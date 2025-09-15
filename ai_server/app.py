@@ -14,7 +14,7 @@ from langchain_core.runnables import RunnableSerializable
 load_dotenv()
 
 AZURE_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
-AZURE_KEY = os.getenv("AZURE_OPENAI_KEY")
+AZURE_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME_4O_MINI")
 AZURE_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION')
 
