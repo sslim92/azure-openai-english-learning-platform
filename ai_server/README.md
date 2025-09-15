@@ -1,4 +1,4 @@
-AI server (FastAPI) to proxy AI-related flows and call Azure OpenAI GPT models.
+AI server (FastAPI) to proxy AI-related flows and call Azure OpenAI GPT models via LangChain.
 
 Setup
 
@@ -10,7 +10,8 @@ Setup
 
    AZURE_OPENAI_ENDPOINT=<your_azure_openai_endpoint>
    AZURE_OPENAI_KEY=<your_api_key>
-   AZURE_OPENAI_DEPLOYMENT=<deployment_or_model_name>
+   AZURE_OPENAI_CHAT_DEPLOYMENT=<your_azure_chat_deployment_name>
+   AZURE_OPENAI_API_VERSION=2024-06-01
    AZURE_SPEECH_KEY=<your_azure_speech_key>
    AZURE_SPEECH_REGION=<your_azure_speech_region>
 
@@ -21,9 +22,23 @@ uvicorn ai_server.app:app --reload --port 8001
 Endpoints
 
 - POST /v1/generate-audio
-- POST /v1/extract-questions
-- POST /v1/match-scripts
 - POST /v1/generate-similar
 - POST /v1/analyze-mistake
-- POST /v1/conversational-tutor
+- POST /v1/conversational-tutor (backward-compatible; proxies to agent)
+- POST /v1/agent-chat (LangChain agent multi-turn chat)
+
+Agent chat request shape
+
+{
+   "agent": "tutor",              // optional, defaults to "tutor"
+   "messages": [ {"role":"user"|"assistant"|"system", "content":"..."}, ... ],
+   "context": {
+      "questionContext": "optional string",
+      "weaknessAnalysis": "optional string"
+   },
+   "input": "current user input (optional)",
+   "temperature": 0.2
+}
+
+Response: { "message": "assistant text" }
 

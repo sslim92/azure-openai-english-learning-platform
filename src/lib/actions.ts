@@ -1,111 +1,51 @@
 
 "use server";
 
-import { getQuestions, type Question, addQuestions, updateQuestionsWithScripts, addUserMistake, type UserMistake, getAvailableMonths } from '@/lib/data';
+// Avoid requiring @types/node in the repo; runtime access is guarded below
+declare const process: any;
+
+import { getQuestions, type Question, addQuestions, addUserMistake, type UserMistake, getAvailableMonths } from '@/lib/data';
 // NOTE: AI calls are proxied to a local Python FastAPI server (see ai_server/).
-const AI_SERVER_BASE = process.env.AI_SERVER_BASE ?? 'http://localhost:8001';
-import { revalidatePath } from 'next/cache';
+const AI_SERVER_BASE = process?.env?.AI_SERVER_BASE ?? 'http://localhost:8001';
 
-
-export async function uploadPdfAndExtractQuestions(pdfDataUri: string, fileName: string) {
+// Use a runtime import for next/cache so TypeScript doesn't require build-time types
+async function safeRevalidatePath(path: string) {
   try {
-    if (!pdfDataUri.startsWith('data:application/pdf;base64,')) {
-        throw new Error('잘못된 데이터 URI입니다. Base64로 인코딩된 PDF여야 합니다.');
-    }
-
-    // Call python AI server to extract questions
-    const resp = await fetch(`${AI_SERVER_BASE}/v1/extract-questions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: { prompt: pdfDataUri } }),
-    });
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      throw new Error(`AI server error: ${resp.status} ${text}`);
-    }
-    const result = await resp.json().catch(() => ({}));
-
-    if (result.questions) {
-      if (result.questions.length > 0) {
-        await addQuestions(result.questions as Question[]);
-        revalidatePath('/');
-        revalidatePath('/questions');
-        revalidatePath('/random-quiz');
-      }
-      return { success: true, questionCount: result.questions.length };
-    }
-    
-    return { success: false, error: 'AI가 문서에서 질문을 찾을 수 없습니다. 문서 형식이 지원되지 않거나 PDF가 이미지 기반일 수 있습니다.' };
-
-  } catch (error) {
-    console.error(`${fileName} 처리 중 오류:`, error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-     if (errorMessage.includes('Invalid PDF')) {
-       return { success: false, error: '잘못되었거나 손상된 PDF 파일입니다. 파일을 확인하고 다시 시도해주세요.' };
-    }
-    return { success: false, error: `PDF 처리 실패. 세부 정보: ${errorMessage}` };
+    // @ts-ignore - dynamic import; next/cache types may not be present in this environment
+    const mod = await import('next/cache');
+    const fn = (mod as any)?.revalidatePath ?? (mod as any)?.unstable_revalidatePath;
+    if (typeof fn === 'function') fn(path);
+  } catch (err) {
+    // running outside Next or types missing; ignore
   }
 }
 
-export async function uploadScriptsAndMatchToQuestions(pdfDataUri: string, year: number, month: number, fileName:string) {
-  try {
-    if (!pdfDataUri.startsWith('data:application/pdf;base64,')) {
-      throw new Error('잘못된 데이터 URI입니다. Base64로 인코딩된 PDF여야 합니다.');
-    }
-    const allQuestions = await getQuestions();
-    const targetQuestions = allQuestions.filter(q => q.year === year && q.month === month && q.topic === '듣기');
 
-    if (targetQuestions.length === 0) {
-      return { success: false, error: `${year}년 ${month}월의 듣기 평가 문제를 찾을 수 없습니다. 먼저 해당 연도의 시험지를 업로드해주세요.` };
-    }
-
-    const resp = await fetch(`${AI_SERVER_BASE}/v1/match-scripts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: { prompt: { pdfDataUri, year, month } } }),
-    });
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      throw new Error(`AI server error: ${resp.status} ${text}`);
-    }
-    const result = await resp.json().catch(() => ({}));
-    
-    if (result.scripts && result.scripts.length > 0) {
-      await updateQuestionsWithScripts(result.scripts);
-      revalidatePath('/');
-      revalidatePath('/questions');
-      revalidatePath('/random-quiz');
-      return { success: true, matchCount: result.scripts.length };
-    }
-    
-    return { success: false, error: 'AI가 대본 PDF에서 스크립트를 추출하지 못했습니다.' };
-  } catch (error) {
-    console.error(`${fileName} 처리 중 오류:`, error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return { success: false, error: `듣기 대본 처리 실패. 세부 정보: ${errorMessage}` };
-  }
-}
+// PDF 관련 기능은 제거되었습니다.
 
 
 export async function getTutorResponse(questionContext: string, weaknessAnalysis: string | null, chatHistory: any) {
   try {
-    const messages = [
-      { role: 'system', content: 'You are a helpful AI tutor.' },
-      { role: 'user', content: `${questionContext}\nWeaknessAnalysis:${weaknessAnalysis ?? ''}` },
-      ...chatHistory,
-    ];
-
-    const resp = await fetch(`${AI_SERVER_BASE}/v1/conversational-tutor`, {
+    const messages = [...chatHistory];
+    const resp = await fetch(`${AI_SERVER_BASE}/v1/agent-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: { messages } }),
+      body: JSON.stringify({
+        agent: 'tutor',
+        messages,
+        context: {
+          questionContext,
+          weaknessAnalysis: weaknessAnalysis ?? undefined,
+        },
+        temperature: 0.2,
+      }),
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
       throw new Error(`AI server error: ${resp.status} ${text}`);
     }
     const data = await resp.json().catch(() => ({}));
-    return { success: true, response: data };
+    return { success: true, response: data?.message };
   } catch (error) {
     console.error('Tutor response failed:', error);
     return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during tutor conversation.' };
@@ -146,8 +86,8 @@ export async function processUserMistake(input: {
             selectedOptionId: input.selectedOptionId,
             reason: input.userReason,
         };
-        await addUserMistake(mistakeRecord);
-        revalidatePath('/progress');
+  await addUserMistake(mistakeRecord);
+  await safeRevalidatePath('/progress');
 
     const aiInput = {
       questionContext: input.questionContext,
@@ -167,9 +107,9 @@ export async function processUserMistake(input: {
         const aiResult = await resp.json().catch(() => ({}));
 
         const newQuestion = aiResult.generatedQuestion as Question;
-        await addQuestions([newQuestion]);
-        revalidatePath('/questions');
-        revalidatePath('/random-quiz');
+  await addQuestions([newQuestion]);
+  await safeRevalidatePath('/questions');
+  await safeRevalidatePath('/random-quiz');
 
         return {
             success: true,
@@ -206,9 +146,9 @@ export async function createSimilarQuestion(originalQuestion: Question) {
         }
         const newQuestion = await resp.json().catch(() => ({}));
 
-        await addQuestions([newQuestion as Question]);
-        revalidatePath('/questions');
-        revalidatePath('/random-quiz');
+  await addQuestions([newQuestion as Question]);
+  await safeRevalidatePath('/questions');
+  await safeRevalidatePath('/random-quiz');
 
         return {
             success: true,
