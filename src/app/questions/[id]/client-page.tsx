@@ -102,10 +102,11 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
     setChatHistory(prev => [...prev, {role: 'user', content: `제가 이 답을 고른 이유는... ${userReason}`}]);
 
     try {
+        const questionContext = `문제: ${currentQuestion.questionText}\n본문: ${currentQuestion.passage}\n선택지: ${currentQuestion.options.map(o => `${o.id}: ${o.text}`).join('\n')}\n정답: ${currentQuestion.correctOptionId}`;
         const result = await processUserMistake({
-            userId: user.uid,
+            userId: user.uid, // This needs to be the UserId from your Users table
             questionId: currentQuestion.id,
-            questionContext: `문제: ${currentQuestion.questionText}\n선택지: ${currentQuestion.options.map(o => `${o.id}: ${o.text}`).join('\n')}\n정답: ${currentQuestion.correctOptionId}`,
+            questionContext: questionContext,
             selectedOptionId: selectedOption.id,
             selectedOptionText: selectedOption.text,
             userReason: userReason,
@@ -173,6 +174,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
     try {
         const questionContext = `
         - 문제: ${currentQuestion.questionText}
+        - 본문: ${currentQuestion.passage}
         - 선택지: ${currentQuestion.options.map(o => `${o.id}: ${o.text}`).join(', ')}
         - 정답: ${currentQuestion.correctOptionId}
         - 해설: ${currentQuestion.explanation}
