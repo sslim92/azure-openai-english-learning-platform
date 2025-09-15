@@ -1,23 +1,10 @@
 
 "use server";
 
-import { analyzeUserWeaknesses } from '@/ai/flows/analyze-user-weaknesses';
 import { getQuestions, type Question, addQuestions, updateQuestionsWithScripts, addUserMistake, type UserMistake, getAvailableMonths } from '@/lib/data';
-import { extractQuestionsFromPdf } from '@/ai/flows/extract-questions-from-pdf';
-import { matchScriptsToQuestions } from '@/ai/flows/match-scripts-to-questions';
-import { generateAudioFromText } from '@/ai/flows/generate-audio-from-text';
-import { conversationalTutor } from '@/ai/flows/conversational-tutor';
-import { analyzeMistakeAndGenerateQuestion, type AnalyzeMistakeAndGenerateQuestionInput } from '@/ai/flows/analyze-mistake-and-generate-question';
-import { generateSimilarQuestion, type GenerateSimilarQuestionInput } from '@/ai/flows/generate-similar-question';
-import type { ConversationalTutorInput } from '@/ai/flows/conversational-tutor';
+// NOTE: AI calls are proxied to a local Python FastAPI server (see ai_server/).
+const AI_SERVER_BASE = process.env.AI_SERVER_BASE ?? 'http://localhost:8001';
 import { revalidatePath } from 'next/cache';
-import { z } from 'zod';
-
-
-const GenerateAudioOutputSchema = z.object({
-  audioDataUri: z.string(),
-});
-type GenerateAudioOutput = z.infer<typeof GenerateAudioOutputSchema>;
 
 
 export async function uploadPdfAndExtractQuestions(pdfDataUri: string, fileName: string) {
@@ -26,7 +13,17 @@ export async function uploadPdfAndExtractQuestions(pdfDataUri: string, fileName:
         throw new Error('잘못된 데이터 URI입니다. Base64로 인코딩된 PDF여야 합니다.');
     }
 
-    const result = await extractQuestionsFromPdf({ pdfDataUri });
+    // Call python AI server to extract questions
+    const resp = await fetch(`${AI_SERVER_BASE}/v1/extract-questions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: { prompt: pdfDataUri } }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`AI server error: ${resp.status} ${text}`);
+    }
+    const result = await resp.json().catch(() => ({}));
 
     if (result.questions) {
       if (result.questions.length > 0) {
@@ -62,7 +59,16 @@ export async function uploadScriptsAndMatchToQuestions(pdfDataUri: string, year:
       return { success: false, error: `${year}년 ${month}월의 듣기 평가 문제를 찾을 수 없습니다. 먼저 해당 연도의 시험지를 업로드해주세요.` };
     }
 
-    const result = await matchScriptsToQuestions({ pdfDataUri, year, month });
+    const resp = await fetch(`${AI_SERVER_BASE}/v1/match-scripts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: { prompt: { pdfDataUri, year, month } } }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`AI server error: ${resp.status} ${text}`);
+    }
+    const result = await resp.json().catch(() => ({}));
     
     if (result.scripts && result.scripts.length > 0) {
       await updateQuestionsWithScripts(result.scripts);
@@ -81,24 +87,48 @@ export async function uploadScriptsAndMatchToQuestions(pdfDataUri: string, year:
 }
 
 
-export async function getTutorResponse(questionContext: string, weaknessAnalysis: string | null, chatHistory: ConversationalTutorInput['chatHistory']) {
-    try {
-        const result = await conversationalTutor({ questionContext, weaknessAnalysis: weaknessAnalysis ?? undefined, chatHistory });
-        return { success: true, response: result.response };
-    } catch (error) {
-        console.error('Tutor response failed:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during tutor conversation.' };
+export async function getTutorResponse(questionContext: string, weaknessAnalysis: string | null, chatHistory: any) {
+  try {
+    const messages = [
+      { role: 'system', content: 'You are a helpful AI tutor.' },
+      { role: 'user', content: `${questionContext}\nWeaknessAnalysis:${weaknessAnalysis ?? ''}` },
+      ...chatHistory,
+    ];
+
+    const resp = await fetch(`${AI_SERVER_BASE}/v1/conversational-tutor`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: { messages } }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`AI server error: ${resp.status} ${text}`);
     }
+    const data = await resp.json().catch(() => ({}));
+    return { success: true, response: data };
+  } catch (error) {
+    console.error('Tutor response failed:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during tutor conversation.' };
+  }
 }
 
-export async function textToSpeech(text: string): Promise<{ success: boolean; data?: GenerateAudioOutput; error?: string }> {
-    try {
-        const result = await generateAudioFromText(text);
-        return { success: true, data: result };
-    } catch (error) {
-        console.error('Text-to-speech failed:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during text-to-speech conversion.' };
+export async function textToSpeech(text: string): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    const resp = await fetch(`${AI_SERVER_BASE}/v1/generate-audio`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`AI server error: ${resp.status} ${text}`);
     }
+    const data = await resp.json().catch(() => ({}));
+    return { success: true, data };
+  } catch (error) {
+    console.error('Text-to-speech failed:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during text-to-speech conversion.' };
+  }
 }
 
 export async function processUserMistake(input: {
@@ -119,12 +149,22 @@ export async function processUserMistake(input: {
         await addUserMistake(mistakeRecord);
         revalidatePath('/progress');
 
-        const aiInput: AnalyzeMistakeAndGenerateQuestionInput = {
-            questionContext: input.questionContext,
-            userAnswerText: input.selectedOptionText,
-            userReason: input.userReason,
-        };
-        const aiResult = await analyzeMistakeAndGenerateQuestion(aiInput);
+    const aiInput = {
+      questionContext: input.questionContext,
+      userAnswerText: input.selectedOptionText,
+      userReason: input.userReason,
+    };
+        // call python AI server to analyze mistake and generate question
+        const resp = await fetch(`${AI_SERVER_BASE}/v1/analyze-mistake`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: { prompt: aiInput } }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          throw new Error(`AI server error: ${resp.status} ${text}`);
+        }
+        const aiResult = await resp.json().catch(() => ({}));
 
         const newQuestion = aiResult.generatedQuestion as Question;
         await addQuestions([newQuestion]);
@@ -147,15 +187,24 @@ export async function processUserMistake(input: {
 
 export async function createSimilarQuestion(originalQuestion: Question) {
      try {
-        const aiInput: GenerateSimilarQuestionInput = {
-            topic: originalQuestion.topic,
-            difficulty: originalQuestion.difficulty,
-            questionText: originalQuestion.questionText,
-            correctOptionId: originalQuestion.correctOptionId,
-            explanation: originalQuestion.explanation,
-        };
+    const aiInput = {
+      topic: originalQuestion.topic,
+      difficulty: originalQuestion.difficulty,
+      questionText: originalQuestion.questionText,
+      correctOptionId: originalQuestion.correctOptionId,
+      explanation: originalQuestion.explanation,
+    };
 
-        const newQuestion = await generateSimilarQuestion(aiInput);
+        const resp = await fetch(`${AI_SERVER_BASE}/v1/generate-similar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: { prompt: aiInput } }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          throw new Error(`AI server error: ${resp.status} ${text}`);
+        }
+        const newQuestion = await resp.json().catch(() => ({}));
 
         await addQuestions([newQuestion as Question]);
         revalidatePath('/questions');
