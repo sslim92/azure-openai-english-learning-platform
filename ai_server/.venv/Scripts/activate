@@ -35,7 +35,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV='F:\MS_DataSchool\project3\workspace\msds_p3_megistudy\ai_server\.venv'
+VIRTUAL_ENV='C:\Users\EL51\Documents\GitHub\msds_p3_megistudy\ai_server\.venv'
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

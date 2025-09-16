@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set "VIRTUAL_ENV=F:\MS_DataSchool\project3\workspace\msds_p3_megistudy\ai_server\.venv"
+set "VIRTUAL_ENV=C:\Users\EL51\Documents\GitHub\msds_p3_megistudy\ai_server\.venv"
 
 if not defined PROMPT set PROMPT=$P$G
 
