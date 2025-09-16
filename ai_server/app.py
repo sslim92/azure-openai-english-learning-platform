@@ -6,13 +6,14 @@ ai_server/app.py
 - /v1/conversational-tutor: 이전 호환용(내부적으로 /v1/agent-chat 위임)
 - /v1/generate-similar: 유사 문제 생성(REST 프록시)
 - /v1/analyze-mistake: 오답 분석(REST 프록시)
-- /v1/generate-audio: Azure Speech TTS
+- /v1/generate-audio: Azure OpenAI audio/speech TTS
 
 주의 사항
 - 현재 구조는 import 시점에 필수 Azure OpenAI 환경변수가 없으면 예외를 던집니다.
     (이미 환경이 준비된 운영/개발 환경을 가정합니다.)
 """
 
+import base64
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
@@ -35,9 +36,16 @@ AZURE_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME_4O_MINI")
 # API 버전이 지정되지 않았다면, 프록시 호출에서 사용하는 기본값을 그대로 활용합니다.
 AZURE_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION") or "2024-06-01"
 
-# Azure Speech (TTS) 설정(선택)
-AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
-AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
+# Azure OpenAI (TTS) 설정
+# - 배포 기반 audio/speech 엔드포인트 사용
+# - 필수: AZURE_OPENAI_TTS_DEPLOYMENT_NAME (예: gpt-4o-mini-tts 등)
+# - 선택: AZURE_OPENAI_TTS_API_VERSION (기본: 2025-03-01-preview)
+# - 선택: AZURE_OPENAI_TTS_VOICE (기본: alloy)
+AZURE_TTS_DEPLOYMENT = os.getenv("AZURE_OPENAI_TTS_DEPLOYMENT_NAME")
+AZURE_TTS_API_VERSION = os.getenv("AZURE_OPENAI_TTS_API_VERSION") or "2025-03-01-preview"
+AZURE_TTS_VOICE = os.getenv("AZURE_OPENAI_TTS_VOICE") or "alloy"
+AZURE_TTS_KEY = os.getenv("AZURE_SPEECH_KEY")
+AZURE_TTS_ENDPOINT = os.getenv("AZURE_SPEECH_ENDPOINT")
 
 if not AZURE_ENDPOINT or not AZURE_KEY or not AZURE_DEPLOYMENT:
     # 실행 환경을 명확히 안내하는 에러 메시지
@@ -54,6 +62,10 @@ def _azure_headers() -> Dict[str, str]:
         "api-key": AZURE_KEY,
         "Content-Type": "application/json",
     }
+
+# Azure Endpoint 정규화 헬퍼(후행 슬래시 제거)
+def _azure_base() -> str:
+    return (AZURE_ENDPOINT or "").rstrip("/")
 
 
 def _extract_model_content(response_json: dict):
@@ -93,31 +105,84 @@ class TTSRequest(BaseModel):
 
 @app.post('/v1/generate-audio')
 async def generate_audio(req: TTSRequest):
-    # Azure Speech REST TTS를 사용해 오디오(WAV)를 생성하고 data URI로 반환합니다.
-    if not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
-        raise HTTPException(status_code=500, detail='Azure Speech credentials not set (AZURE_SPEECH_KEY, AZURE_SPEECH_REGION)')
+    """
+    Azure OpenAI audio/speech 엔드포인트를 사용해 텍스트를 음성(WAV)으로 변환합니다.
+
+    TTS 전용 환경 변수만 사용합니다(LLM 리소스와 분리됨).
+    필수
+    - AZURE_SPEECH_ENDPOINT: TTS 리소스 엔드포인트(전체 경로 또는 베이스 URL)
+    - AZURE_SPEECH_KEY: TTS 리소스 API 키
+    선택
+    - AZURE_OPENAI_TTS_DEPLOYMENT_NAME: 배포명(엔드포인트가 베이스일 때 필요)
+    - AZURE_OPENAI_TTS_API_VERSION: 기본 2025-03-01-preview
+    - AZURE_OPENAI_TTS_VOICE: 기본 alloy
+    """
+    # 필수 값 확인
+    if not AZURE_TTS_ENDPOINT:
+        raise HTTPException(status_code=500, detail="TTS 엔드포인트가 누락되었습니다. AZURE_SPEECH_ENDPOINT를 설정하세요.")
+    if not AZURE_TTS_KEY:
+        raise HTTPException(status_code=500, detail="TTS API 키가 누락되었습니다. AZURE_SPEECH_KEY를 설정하세요.")
+
+    endpoint = (AZURE_TTS_ENDPOINT or "").strip()
+    # endpoint가 전체 경로인지(배포/오디오 포함) 판단
+    is_full = ("/openai/deployments/" in endpoint) and ("/audio/speech" in endpoint)
+    url: str
+    model_name: Optional[str] = AZURE_TTS_DEPLOYMENT
+
+    if is_full:
+        url = endpoint
+        if "api-version=" not in url:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}api-version={AZURE_TTS_API_VERSION}"
+        # 배포명이 비어있다면 URL에서 추출 시도
+        if not model_name:
+            try:
+                import re
+                m = re.search(r"/deployments/([^/]+)/audio/speech", url)
+                if m:
+                    model_name = m.group(1)
+            except Exception:
+                pass
+    else:
+        # 베이스 엔드포인트라면 배포명이 필요
+        if not model_name:
+            raise HTTPException(status_code=500, detail="TTS 배포명이 누락되었습니다. AZURE_OPENAI_TTS_DEPLOYMENT_NAME를 설정하세요.")
+        base = endpoint.rstrip("/")
+        url = f"{base}/openai/deployments/{model_name}/audio/speech?api-version={AZURE_TTS_API_VERSION}"
+
+    headers = {
+        "Authorization": f"Bearer {AZURE_TTS_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "audio/wav",
+    }
+    body = {
+        "model": model_name or "",
+        "voice": AZURE_TTS_VOICE,
+        "input": req.text,
+    }
+
     try:
-        tts_url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
-        tts_headers = {
-            'Ocp-Apim-Subscription-Key': AZURE_SPEECH_KEY,
-            'Content-Type': 'application/ssml+xml',
-            'X-Microsoft-OutputFormat': 'riff-16khz-16bit-mono-pcm'
-        }
-        # 단순 SSML(기본 음성). 필요 시 환경변수/요청 파라미터로 음성 선택을 확장할 수 있습니다.
-        ssml = f"""<speak version='1.0' xml:lang='en-US'>
-  <voice xml:lang='en-US' xml:gender='Female' name='en-US-AriaNeural'>
-    {req.text}
-  </voice>
-</speak>"""
-        resp = requests.post(tts_url, headers=tts_headers, data=ssml.encode('utf-8'), timeout=60)
-        resp.raise_for_status()
+        resp = requests.post(url, headers=headers, json=body, timeout=120)
+        if not resp.ok:
+            # 본문이 바이너리가 아닐 수 있으므로 text를 안전하게 잘라서 표시
+            snippet = ""
+            try:
+                snippet = resp.text[:500]
+            except Exception:
+                snippet = "<no-text-body>"
+            raise HTTPException(
+                status_code=500,
+                detail=f"Azure OpenAI TTS 실패: status={resp.status_code}, url={url}, body={snippet}"
+            )
+
         audio_bytes = resp.content
-        import base64
         wav_b64 = base64.b64encode(audio_bytes).decode('ascii')
         data_uri = f"data:audio/wav;base64,{wav_b64}"
         return {"audioDataUri": data_uri}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"TTS 생성 중 오류: {str(e)}")
 
 class GenericRequest(BaseModel):
     input: dict
@@ -253,7 +318,8 @@ async def generate_similar(req: GenericRequest):
     # Azure OpenAI Chat Completions 프록시(간단한 프롬프트 → 답변/문항 JSON)
     try:
         prompt = req.input.get('prompt')
-        url = f"{AZURE_ENDPOINT}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions?api-version={AZURE_API_VERSION}"
+        base = _azure_base()
+        url = f"{base}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions?api-version={AZURE_API_VERSION}"
         body = {"messages": [{"role":"user","content": prompt}], "max_tokens": 512}
         resp = requests.post(url, headers=_azure_headers(), json=body, timeout=120)
         resp.raise_for_status()
@@ -282,12 +348,35 @@ async def conversational_tutor(req: GenericRequest):
 async def analyze_mistake(req: GenericRequest):
     try:
         prompt = req.input.get('prompt')
-        url = f"{AZURE_ENDPOINT}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions?api-version={AZURE_API_VERSION}"
+        base = _azure_base()
+        url = f"{base}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions?api-version={AZURE_API_VERSION}"
         body = {"messages": [{"role":"user","content": prompt}], "max_tokens": 1000}
         resp = requests.post(url, headers=_azure_headers(), json=body, timeout=120)
         resp.raise_for_status()
         data = resp.json()
         raw, parsed = _extract_model_content(data)
         return parsed if parsed is not None else { 'raw': raw }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 간단한 환경 헬스 체크(민감정보는 마스킹)
+@app.get('/health')
+async def health():
+    try:
+        base = _azure_base()
+        return {
+            "ok": True,
+            "azureEndpoint": base,
+            "apiVersion": AZURE_API_VERSION,
+            "tts": {
+                "deployment": AZURE_TTS_DEPLOYMENT or None,
+                "apiVersion": AZURE_TTS_API_VERSION,
+                "voice": AZURE_TTS_VOICE,
+                "endpoint": (AZURE_TTS_ENDPOINT or "")[:80],
+                "keySuffix": (AZURE_TTS_KEY[-4:] if AZURE_TTS_KEY else None),
+            },
+            # 키는 유출 방지를 위해 끝 4자리만 노출
+            "keySuffix": (AZURE_KEY[-4:] if AZURE_KEY else None),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
