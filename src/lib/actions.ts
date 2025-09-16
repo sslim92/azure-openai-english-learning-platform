@@ -89,16 +89,18 @@ export async function processUserMistake(input: {
   await addUserMistake(mistakeRecord);
   await safeRevalidatePath('/progress');
 
-    const aiInput = {
+    const aiInputObj = {
       questionContext: input.questionContext,
       userAnswerText: input.selectedOptionText,
       userReason: input.userReason,
     };
+    // Convert ai input object into a readable prompt string for the backend
+    const aiPrompt = `questionContext: ${aiInputObj.questionContext}\nuserAnswerText: ${aiInputObj.userAnswerText}\nuserReason: ${aiInputObj.userReason}`;
         // call python AI server to analyze mistake and generate question
         const resp = await fetch(`${AI_SERVER_BASE}/v1/analyze-mistake`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: { prompt: aiInput } }),
+          body: JSON.stringify({ input: { prompt: aiPrompt } }),
         });
         if (!resp.ok) {
           const text = await resp.text().catch(() => '');
@@ -151,18 +153,19 @@ export async function processUserMistake(input: {
 
 export async function createSimilarQuestion(originalQuestion: Question) {
      try {
-    const aiInput = {
+    const aiInputObj = {
       topic: originalQuestion.topic,
       difficulty: originalQuestion.difficulty,
       questionText: originalQuestion.questionText,
       correctOptionId: originalQuestion.correctOptionId,
       explanation: originalQuestion.explanation,
     };
+    const aiPrompt = `topic: ${aiInputObj.topic}\ndifficulty: ${aiInputObj.difficulty}\nquestionText: ${aiInputObj.questionText}\ncorrectOptionId: ${aiInputObj.correctOptionId}\nexplanation: ${aiInputObj.explanation}`;
 
         const resp = await fetch(`${AI_SERVER_BASE}/v1/generate-similar`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: { prompt: aiInput } }),
+          body: JSON.stringify({ input: { prompt: aiPrompt } }),
         });
         if (!resp.ok) {
           const text = await resp.text().catch(() => '');

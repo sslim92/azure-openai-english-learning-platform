@@ -315,7 +315,29 @@ async def agent_chat(req: AgentChatRequest):
 async def generate_similar(req: GenericRequest):
     """간단한 프롬프트를 Azure Chat Completions에 프록시하여 JSON 응답을 반환합니다."""
     try:
-        prompt = req.input.get('prompt')
+        # 방어적 입력 처리: prompt가 dict(객체)로 온 경우 사람이 읽을 수 있는 문자열로 변환
+        def _prompt_to_text(p):
+            if isinstance(p, str):
+                return p
+            try:
+                # 사전형 객체인 경우, 주요 필드를 순서대로 읽기 좋은 형태로 병합
+                if isinstance(p, dict):
+                    parts = []
+                    # Preserve some common keys if present
+                    for key in ("questionContext", "questionText", "topic", "userAnswerText", "userReason", "explanation", "difficulty"):
+                        if key in p and p.get(key) is not None:
+                            parts.append(f"{key}: {p.get(key)}")
+                    # Fallback: include all keys sorted
+                    if not parts:
+                        for k in sorted(p.keys()):
+                            parts.append(f"{k}: {p.get(k)}")
+                    return "\n".join(parts)
+                # If it's a list or other JSON-serializable, stringify
+                return json.dumps(p, ensure_ascii=False)
+            except Exception:
+                return str(p)
+
+        prompt = _prompt_to_text(req.input.get('prompt'))
         base = _azure_base()
         url = f"{base}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions?api-version={AZURE_API_VERSION}"
         body = {"messages": [{"role": "user", "content": prompt}], "max_tokens": 512}
@@ -344,7 +366,25 @@ async def conversational_tutor(req: GenericRequest):
 async def analyze_mistake(req: GenericRequest):
     """오답 분석 프록시: 간단히 Azure Chat Completions를 호출합니다."""
     try:
-        prompt = req.input.get('prompt')
+        # 방어적 입력 처리: prompt가 dict(객체)로 온 경우 사람이 읽을 수 있는 문자열로 변환
+        def _prompt_to_text(p):
+            if isinstance(p, str):
+                return p
+            try:
+                if isinstance(p, dict):
+                    parts = []
+                    for key in ("questionContext", "questionText", "topic", "userAnswerText", "userReason", "explanation", "difficulty"):
+                        if key in p and p.get(key) is not None:
+                            parts.append(f"{key}: {p.get(key)}")
+                    if not parts:
+                        for k in sorted(p.keys()):
+                            parts.append(f"{k}: {p.get(k)}")
+                    return "\n".join(parts)
+                return json.dumps(p, ensure_ascii=False)
+            except Exception:
+                return str(p)
+
+        prompt = _prompt_to_text(req.input.get('prompt'))
         base = _azure_base()
         url = f"{base}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions?api-version={AZURE_API_VERSION}"
         body = {"messages": [{"role": "user", "content": prompt}], "max_tokens": 1000}
