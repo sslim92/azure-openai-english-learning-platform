@@ -56,12 +56,13 @@ export default function QuestionDisplay({
   };
   
   const isAiGenerated = question.id.startsWith('ai-generated-');
+  const fullQuestionText = `${question.questionText}\n\n${question.passage || ''}`;
 
   return (
     <Card>
       <CardHeader>
         <div className="flex justify-between items-start">
-            <CardTitle className="font-headline text-2xl">{question.subject}: {question.topic}</CardTitle>
+            <CardTitle className="font-headline text-2xl">{question.intent}: {question.topic}</CardTitle>
             {isAiGenerated && (
                  <div className="text-sm inline-flex items-center rounded-md bg-blue-50 px-2.5 py-1 font-semibold text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
                     <Sparkles className="mr-1.5 h-4 w-4" /> AI 맞춤 문제
@@ -109,14 +110,8 @@ export default function QuestionDisplay({
           </div>
         )}
         
-        {question.imageDescription && (
-          <div className="mb-6 p-4 border rounded-md bg-secondary/50">
-              <h4 className="font-semibold mb-3 flex items-center"><Info className="mr-2 h-5 w-5" /> 참고 자료</h4>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{question.imageDescription}</p>
-          </div>
-         )}
+        <p className="text-lg mb-6 whitespace-pre-wrap">{fullQuestionText}</p>
 
-        <p className="text-lg mb-6 whitespace-pre-wrap">{question.questionText}</p>
         <form onSubmit={handleSubmit}>
           <RadioGroup name="question-options" value={selectedOption ?? ""} onValueChange={setSelectedOption} disabled={isSubmitted}>
             {question.options.map(option => (
