@@ -45,5 +45,5 @@ firebase-debug.log
 firestore-debug.log
 
 # Python virtual environments
-.venv/
-__pycache__/
+ai_server/.venv/
+ai_server/__pycache__/
