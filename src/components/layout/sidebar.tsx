@@ -13,7 +13,7 @@ import {
   SidebarFooter,
   SidebarMenuSkeleton,
 } from "@/components/ui/sidebar";
-import { BookOpen, BarChart3, FileUp, Shuffle, Mic, Home, LogIn, CircleUser } from "lucide-react";
+import { BookOpen, BarChart3, Shuffle, Mic, Home, LogIn, CircleUser } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "../ui/button";
 
@@ -23,7 +23,7 @@ const menuItems = [
   { href: "/random-quiz", label: "랜덤 문제", icon: Shuffle },
   { href: "/listening-quiz", label: "AI 듣기 평가", icon: Mic },
   { href: "/progress", label: "나의 학습 현황", icon: BarChart3 },
-  { href: "/admin/upload", label: "PDF 업로드", icon: FileUp },
+  // Removed PDF upload feature
 ];
 
 export function AppSidebar({ isMobile = false }) {

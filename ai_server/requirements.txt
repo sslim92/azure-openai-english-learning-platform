@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+openai
+python-dotenv
+pydantic
+requests
+langchain>=0.2.14
+langchain-openai>=0.1.23

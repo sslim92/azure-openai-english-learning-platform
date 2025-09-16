@@ -1,114 +1,74 @@
 
 "use server";
 
-import { analyzeUserWeaknesses } from '@/ai/flows/analyze-user-weaknesses';
-import { getQuestions, type Question, addQuestions, addUserMistake, type UserMistake, getAvailableMonths, getQuestionById as getQuestionByIdFromDb, updateListeningScript } from '@/lib/data';
-import { extractQuestionsFromPdf, type ExtractQuestionsOutput } from '@/ai/flows/extract-questions-from-pdf';
-import { matchScriptsToQuestions } from '@/ai/flows/match-scripts-to-questions';
-import { generateAudioFromText } from '@/ai/flows/generate-audio-from-text';
-import { conversationalTutor } from '@/ai/flows/conversational-tutor';
-import { analyzeMistakeAndGenerateQuestion, type AnalyzeMistakeAndGenerateQuestionInput } from '@/ai/flows/analyze-mistake-and-generate-question';
-import { generateSimilarQuestion, type GenerateSimilarQuestionInput } from '@/ai/flows/generate-similar-question';
-import type { ConversationalTutorInput } from '@/ai/flows/conversational-tutor';
-import { revalidatePath } from 'next/cache';
-import { z } from 'zod';
+// Avoid requiring @types/node in the repo; runtime access is guarded below
+declare const process: any;
 
-const GenerateAudioOutputSchema = z.object({
-  audioDataUri: z.string(),
-});
-type GenerateAudioOutput = z.infer<typeof GenerateAudioOutputSchema>;
+import { getQuestions, type Question, addQuestions, addUserMistake, type UserMistake, getAvailableMonths } from '@/lib/data';
+// NOTE: AI calls are proxied to a local Python FastAPI server (see ai_server/).
+const AI_SERVER_BASE = process?.env?.AI_SERVER_BASE ?? 'http://localhost:8001';
 
-function transformExtractedQuestion(extracted: any): { question: Omit<Question, 'options'>, options: { questionId: string, id: string, text: string }[] } {
-    // The AI might return a questionText that contains both the main question and the passage. We need to separate them.
-    const [questionText, passage] = extracted.questionText.split('\\n\\n');
-
-    const questionData = {
-        id: extracted.id,
-        year: extracted.year,
-        month: extracted.month,
-        intent: extracted.topic, // Mapping 'topic' from AI to 'intent' in DB
-        topic: 'General', // Defaulting Topic, can be refined
-        questionText: questionText,
-        passage: passage || '', // Handle cases with no passage
-        correctOptionId: extracted.correctOptionId,
-        explanation: extracted.explanation,
-        difficulty: extracted.difficulty,
-        listeningScript: extracted.listeningScript,
-        generationReason: extracted.generationReason,
-    };
-
-    const optionsData = extracted.options.map((opt: {id: string, text: string}) => ({
-        questionId: extracted.id,
-        id: opt.id,
-        text: opt.text,
-    }));
-
-    return { question: questionData, options: optionsData };
-}
-
-export async function uploadPdfAndExtractQuestions(pdfDataUri: string, fileName: string) {
-    try {
-        const result: ExtractQuestionsOutput = await extractQuestionsFromPdf({ pdfDataUri });
-        
-        if (result.questions && result.questions.length > 0) {
-            const allQuestionsData: Omit<Question, 'options'>[] = [];
-            const allOptionsData: { questionId: string, id: string, text: string }[] = [];
-
-            result.questions.forEach(q => {
-                const { question, options } = transformExtractedQuestion(q);
-                allQuestionsData.push(question);
-                allOptionsData.push(...options);
-            });
-            
-            await addQuestions(allQuestionsData, allOptionsData);
-            revalidatePath('/questions');
-            return { success: true, questionCount: result.questions.length };
-        }
-        
-        return { success: true, questionCount: 0 };
-    } catch (error) {
-        console.error(`Error processing ${fileName}:`, error);
-        return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during PDF processing.' };
-    }
+// Use a runtime import for next/cache so TypeScript doesn't require build-time types
+async function safeRevalidatePath(path: string) {
+  try {
+    // @ts-ignore - dynamic import; next/cache types may not be present in this environment
+    const mod = await import('next/cache');
+    const fn = (mod as any)?.revalidatePath ?? (mod as any)?.unstable_revalidatePath;
+    if (typeof fn === 'function') fn(path);
+  } catch (err) {
+    // running outside Next or types missing; ignore
+  }
 }
 
 
-export async function uploadScriptsAndMatchToQuestions(pdfDataUri: string, year: number, month: number, fileName: string) {
-    try {
-        const result = await matchScriptsToQuestions({ pdfDataUri, year, month });
-        if (result.scripts && result.scripts.length > 0) {
-            // In a real scenario, you might want to do this in a single transaction
-            for (const script of result.scripts) {
-                await updateListeningScript(script.questionId, script.script);
-            }
-            revalidatePath('/questions');
-            return { success: true, matchCount: result.scripts.length };
-        }
-        return { success: true, matchCount: 0 };
-    } catch (error) {
-        console.error(`Error matching scripts from ${fileName}:`, error);
-        return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during script matching.' };
+// PDF 관련 기능은 제거되었습니다.
+
+
+export async function getTutorResponse(questionContext: string, weaknessAnalysis: string | null, chatHistory: any) {
+  try {
+    const messages = [...chatHistory];
+    const resp = await fetch(`${AI_SERVER_BASE}/v1/agent-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent: 'tutor',
+        messages,
+        context: {
+          questionContext,
+          weaknessAnalysis: weaknessAnalysis ?? undefined,
+        },
+        temperature: 0.2,
+      }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`AI server error: ${resp.status} ${text}`);
     }
+    const data = await resp.json().catch(() => ({}));
+    return { success: true, response: data?.message };
+  } catch (error) {
+    console.error('Tutor response failed:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during tutor conversation.' };
+  }
 }
 
-export async function getTutorResponse(questionContext: string, weaknessAnalysis: string | null, chatHistory: ConversationalTutorInput['chatHistory']) {
-    try {
-        const result = await conversationalTutor({ questionContext, weaknessAnalysis: weaknessAnalysis ?? undefined, chatHistory });
-        return { success: true, response: result.response };
-    } catch (error) {
-        console.error('Tutor response failed:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during tutor conversation.' };
+export async function textToSpeech(text: string): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    const resp = await fetch(`${AI_SERVER_BASE}/v1/generate-audio`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`AI server error: ${resp.status} ${text}`);
     }
-}
-
-export async function textToSpeech(text: string): Promise<{ success: boolean; data?: GenerateAudioOutput; error?: string }> {
-    try {
-        const result = await generateAudioFromText(text);
-        return { success: true, data: result };
-    } catch (error) {
-        console.error('Text-to-speech failed:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during text-to-speech conversion.' };
-    }
+    const data = await resp.json().catch(() => ({}));
+    return { success: true, data };
+  } catch (error) {
+    console.error('Text-to-speech failed:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'An unknown error occurred during text-to-speech conversion.' };
+  }
 }
 
 export async function processUserMistake(input: {
@@ -126,22 +86,30 @@ export async function processUserMistake(input: {
             selectedOptionKey: input.selectedOptionId,
             reason: input.userReason,
         };
-        await addUserMistake(mistakeRecord);
-        revalidatePath('/progress');
+  await addUserMistake(mistakeRecord);
+  await safeRevalidatePath('/progress');
 
-        const aiInput: AnalyzeMistakeAndGenerateQuestionInput = {
-            questionContext: input.questionContext,
-            userAnswerText: input.selectedOptionText,
-            userReason: input.userReason,
-        };
-        const aiResult = await analyzeMistakeAndGenerateQuestion(aiInput);
+    const aiInput = {
+      questionContext: input.questionContext,
+      userAnswerText: input.selectedOptionText,
+      userReason: input.userReason,
+    };
+        // call python AI server to analyze mistake and generate question
+        const resp = await fetch(`${AI_SERVER_BASE}/v1/analyze-mistake`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: { prompt: aiInput } }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          throw new Error(`AI server error: ${resp.status} ${text}`);
+        }
+        const aiResult = await resp.json().catch(() => ({}));
 
-        const { question: newQuestionData, options: newOptionsData } = transformExtractedQuestion(aiResult.generatedQuestion);
-        
-        await addQuestions([newQuestionData], newOptionsData);
-
-        revalidatePath('/questions');
-        revalidatePath('/random-quiz');
+        const newQuestion = aiResult.generatedQuestion as Question;
+  await addQuestions([newQuestion]);
+  await safeRevalidatePath('/questions');
+  await safeRevalidatePath('/random-quiz');
 
         return {
             success: true,
@@ -159,21 +127,28 @@ export async function processUserMistake(input: {
 
 export async function createSimilarQuestion(originalQuestion: Question) {
      try {
-        const aiInput: GenerateSimilarQuestionInput = {
-            topic: originalQuestion.topic,
-            difficulty: originalQuestion.difficulty,
-            questionText: `${originalQuestion.questionText}\n\n${originalQuestion.passage}`,
-            correctOptionId: originalQuestion.correctOptionId,
-            explanation: originalQuestion.explanation,
-        };
+    const aiInput = {
+      topic: originalQuestion.topic,
+      difficulty: originalQuestion.difficulty,
+      questionText: originalQuestion.questionText,
+      correctOptionId: originalQuestion.correctOptionId,
+      explanation: originalQuestion.explanation,
+    };
 
-        const aiGeneratedQuestion = await generateSimilarQuestion(aiInput);
+        const resp = await fetch(`${AI_SERVER_BASE}/v1/generate-similar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: { prompt: aiInput } }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          throw new Error(`AI server error: ${resp.status} ${text}`);
+        }
+        const newQuestion = await resp.json().catch(() => ({}));
 
-        const { question: newQuestionData, options: newOptionsData } = transformExtractedQuestion(aiGeneratedQuestion);
-
-        await addQuestions([newQuestionData], newOptionsData);
-        revalidatePath('/questions');
-        revalidatePath('/random-quiz');
+  await addQuestions([newQuestion as Question]);
+  await safeRevalidatePath('/questions');
+  await safeRevalidatePath('/random-quiz');
 
         return {
             success: true,
