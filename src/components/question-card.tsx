@@ -10,16 +10,9 @@ interface QuestionCardProps {
 }
 
 export function QuestionCard({ question }: QuestionCardProps) {
-  const getSubjectBadgeVariant = (subject: Question['subject']) => {
-    switch (subject) {
-      case 'English':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
-      default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
-    }
-  }
   
   const isAiGenerated = question.id.startsWith('ai-generated-');
+  const fullQuestionText = `${question.questionText}\n\n${question.passage || ''}`;
 
   return (
     <Link href={`/questions/${question.id}`} className="block hover:shadow-lg transition-shadow duration-200 rounded-lg">
@@ -27,7 +20,7 @@ export function QuestionCard({ question }: QuestionCardProps) {
         <CardHeader>
           <div className="flex justify-between items-start mb-2 gap-2">
             <div>
-                <Badge variant="outline" className={getSubjectBadgeVariant(question.subject)}>{question.subject}</Badge>
+                <Badge variant="outline" className='bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'>English</Badge>
             </div>
             {isAiGenerated ? (
                 <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 whitespace-nowrap">
@@ -39,11 +32,11 @@ export function QuestionCard({ question }: QuestionCardProps) {
               )
             }
           </div>
-          <CardTitle className="text-lg font-headline">{question.topic}</CardTitle>
+          <CardTitle className="text-lg font-headline">{question.intent}</CardTitle>
         </CardHeader>
         <CardContent className="flex-grow">
           <p className="text-sm text-muted-foreground line-clamp-3">
-            {question.questionText}
+            {fullQuestionText}
           </p>
         </CardContent>
         <CardFooter>

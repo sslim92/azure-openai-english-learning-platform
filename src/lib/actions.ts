@@ -80,10 +80,10 @@ export async function processUserMistake(input: {
     userReason: string;
 }) {
     try {
-        const mistakeRecord: Omit<UserMistake, 'id' | 'timestamp'> = {
+        const mistakeRecord: UserMistake = {
             userId: input.userId,
             questionId: input.questionId,
-            selectedOptionId: input.selectedOptionId,
+            selectedOptionKey: input.selectedOptionId,
             reason: input.userReason,
         };
   await addUserMistake(mistakeRecord);
@@ -114,7 +114,7 @@ export async function processUserMistake(input: {
         return {
             success: true,
             analysis: aiResult.weaknessAnalysis,
-            newQuestion: newQuestion,
+            newQuestion: { ...newQuestionData, options: newOptionsData.map(o => ({ id: o.id, text: o.text })) } as Question,
         };
 
     } catch (error) {
@@ -152,13 +152,31 @@ export async function createSimilarQuestion(originalQuestion: Question) {
 
         return {
             success: true,
-            newQuestion: newQuestion,
+            newQuestion: { ...newQuestionData, options: newOptionsData.map(o => ({ id: o.id, text: o.text })) } as Question,
         };
     } catch (error) {
         console.error("Error generating similar question:", error);
         const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
         return { success: false, error: errorMessage };
     }
+}
+
+
+// --- Server Actions for data fetching ---
+
+export async function fetchAllQuestions(): Promise<Question[]> {
+    return getQuestions();
+}
+
+export async function fetchQuestionById(id: string): Promise<Question | null> {
+    return getQuestionByIdFromDb(id);
+}
+
+
+export async function getAvailableYears(): Promise<number[]> {
+    const questions = await getQuestions();
+    const years = new Set(questions.map(q => q.year).filter((y): y is number => y !== undefined));
+    return Array.from(years).sort((a, b) => b - a);
 }
 
 export async function getAvailableMonthsForYear(year: number) {
