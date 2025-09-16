@@ -1,9 +1,24 @@
+"""
+ai_server/app.py
+
+프로젝트에서 사용하는 FastAPI 백엔드. 아래의 핵심 기능을 제공합니다.
+- /v1/agent-chat: LangChain 기반 튜터 대화
+- /v1/conversational-tutor: 이전 호환용(내부적으로 /v1/agent-chat 위임)
+- /v1/generate-similar: 유사 문제 생성(REST 프록시)
+- /v1/analyze-mistake: 오답 분석(REST 프록시)
+- /v1/generate-audio: Azure Speech TTS
+
+주의 사항
+- 현재 구조는 import 시점에 필수 Azure OpenAI 환경변수가 없으면 예외를 던집니다.
+    (이미 환경이 준비된 운영/개발 환경을 가정합니다.)
+"""
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
 import requests
-from typing import List, Literal, Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 
 # LangChain / Azure OpenAI
 from langchain_openai import AzureChatOpenAI
@@ -11,34 +26,42 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, Base
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableSerializable
 
-load_dotenv()
+load_dotenv()  # .env 파일 로드(있을 경우)
 
+# Azure OpenAI 설정(필수)
 AZURE_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME_4O_MINI")
-AZURE_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION')
+# API 버전이 지정되지 않았다면, 프록시 호출에서 사용하는 기본값을 그대로 활용합니다.
+AZURE_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION") or "2024-06-01"
 
-# Azure Speech (TTS) settings
+# Azure Speech (TTS) 설정(선택)
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
 
 if not AZURE_ENDPOINT or not AZURE_KEY or not AZURE_DEPLOYMENT:
-    raise RuntimeError("Please set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, and an Azure chat deployment (AZURE_OPENAI_CHAT_DEPLOYMENT or AZURE_OPENAI_DEPLOYMENT) in .env")
+    # 실행 환경을 명확히 안내하는 에러 메시지
+    raise RuntimeError(
+        "Azure OpenAI 설정이 누락되었습니다. 필수 환경변수: "
+        "AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY(또는 AZURE_OPENAI_KEY), AZURE_OPENAI_DEPLOYMENT_NAME_4O_MINI"
+    )
 
 app = FastAPI()
 
-headers = {
-    'api-key': AZURE_KEY,
-    'Content-Type': 'application/json'
-}
+# 공통 HTTP 헤더 생성 함수(REST 프록시 엔드포인트에서 사용)
+def _azure_headers() -> Dict[str, str]:
+    return {
+        "api-key": AZURE_KEY,
+        "Content-Type": "application/json",
+    }
 
 
 def _extract_model_content(response_json: dict):
-    """Extract the assistant text from Azure chat/completions response and try to parse JSON.
-
-    Returns (raw_text, parsed_json_or_None)
     """
-    # Azure chat completion shape: { choices: [ { message: { role, content } }, ... ] }
+    Azure Chat Completions 응답에서 모델 텍스트를 추출하고, 가능하면 JSON으로 파싱합니다.
+    반환값: (원문 텍스트, 파싱된 JSON 또는 None)
+    """
+    # Azure chat completion 응답 형태: { choices: [ { message: { role, content } }, ... ] }
     try:
         choices = response_json.get('choices') or []
         if len(choices) > 0:
@@ -70,7 +93,7 @@ class TTSRequest(BaseModel):
 
 @app.post('/v1/generate-audio')
 async def generate_audio(req: TTSRequest):
-    # Use Azure Speech REST TTS to generate audio (wav) and return as data URI
+    # Azure Speech REST TTS를 사용해 오디오(WAV)를 생성하고 data URI로 반환합니다.
     if not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
         raise HTTPException(status_code=500, detail='Azure Speech credentials not set (AZURE_SPEECH_KEY, AZURE_SPEECH_REGION)')
     try:
@@ -80,7 +103,7 @@ async def generate_audio(req: TTSRequest):
             'Content-Type': 'application/ssml+xml',
             'X-Microsoft-OutputFormat': 'riff-16khz-16bit-mono-pcm'
         }
-        # Simple SSML with default voice; in production allow config
+        # 단순 SSML(기본 음성). 필요 시 환경변수/요청 파라미터로 음성 선택을 확장할 수 있습니다.
         ssml = f"""<speak version='1.0' xml:lang='en-US'>
   <voice xml:lang='en-US' xml:gender='Female' name='en-US-AriaNeural'>
     {req.text}
@@ -101,10 +124,11 @@ class GenericRequest(BaseModel):
 
 
 # =========================
-# LangChain Agent machinery
+# LangChain 튜터 에이전트 구성
 # =========================
 
 def make_azure_llm() -> AzureChatOpenAI:
+    """Azure OpenAI Chat LLM 인스턴스 생성(튜터 에이전트에서 사용)."""
     return AzureChatOpenAI(
         azure_deployment=AZURE_DEPLOYMENT,
         azure_endpoint=AZURE_ENDPOINT,
@@ -115,7 +139,11 @@ def make_azure_llm() -> AzureChatOpenAI:
 
 
 class Agent:
-    """Simple chat agent wrapper around AzureChatOpenAI with pluggable system prompts."""
+    """AzureChatOpenAI 위에 얹은 간단한 대화용 에이전트 래퍼.
+
+    - system 프롬프트를 주입하여 역할/톤을 고정
+    - 대화 이력(history) + 현재 입력을 LangChain 체인에 전달
+    """
 
     def __init__(self, name: str, system_prompt: str):
         self.name = name
@@ -133,12 +161,17 @@ class Agent:
         )
 
     async def ainvoke(self, *, input: str, history: List[BaseMessage]) -> str:
-        result = await self.chain.ainvoke({"input": input, "history": history})
-        # result is a ChatMessage
-        return getattr(result, "content", str(result))
+            result = await self.chain.ainvoke({"input": input, "history": history})
+            # result는 LangChain ChatMessage로, content 속성에 문자열이 담깁니다.
+            return getattr(result, "content", str(result))
 
 
 def build_history(messages: List[dict], system_prefix: Optional[str] = None) -> List[BaseMessage]:
+    """프론트에서 전달한 메시지 배열을 LangChain 메시지 객체 목록으로 변환.
+
+    - system_prefix가 존재하면 첫 system 메시지로 주입(컨텍스트/약점 등)
+    - role 매핑: user/human -> HumanMessage, assistant/model -> AIMessage, system -> SystemMessage
+    """
     history: List[BaseMessage] = []
     if system_prefix:
         history.append(SystemMessage(content=system_prefix))
@@ -154,7 +187,7 @@ def build_history(messages: List[dict], system_prefix: Optional[str] = None) -> 
     return history
 
 
-# Agent registry
+# 에이전트 레지스트리(필요 시 다중 에이전트로 확장 가능)
 AGENTS: Dict[str, Agent] = {
     "tutor": Agent(
         name="tutor",
@@ -205,7 +238,7 @@ async def agent_chat(req: AgentChatRequest):
                 break
     user_input = user_input or ""
 
-    # Apply temperature if provided
+    # 요청 시 temperature를 조정할 수 있습니다(기본 0.2)
     if req.temperature is not None and hasattr(agent.llm, "temperature"):
         agent.llm.temperature = float(req.temperature)
 
@@ -217,12 +250,12 @@ async def agent_chat(req: AgentChatRequest):
 
 @app.post('/v1/generate-similar')
 async def generate_similar(req: GenericRequest):
-    # proxy example to completions - replace with chat completions if needed
+    # Azure OpenAI Chat Completions 프록시(간단한 프롬프트 → 답변/문항 JSON)
     try:
         prompt = req.input.get('prompt')
-        url = f"{AZURE_ENDPOINT}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions?api-version=2024-06-01"
+        url = f"{AZURE_ENDPOINT}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions?api-version={AZURE_API_VERSION}"
         body = {"messages": [{"role":"user","content": prompt}], "max_tokens": 512}
-        resp = requests.post(url, headers=headers, json=body, timeout=120)
+        resp = requests.post(url, headers=_azure_headers(), json=body, timeout=120)
         resp.raise_for_status()
         data = resp.json()
         raw, parsed = _extract_model_content(data)
@@ -232,7 +265,7 @@ async def generate_similar(req: GenericRequest):
 
 @app.post('/v1/conversational-tutor')
 async def conversational_tutor(req: GenericRequest):
-    """Backward-compatible endpoint that proxies to the tutor agent using LangChain."""
+    """이전 호환용 엔드포인트: 내부적으로 /v1/agent-chat을 호출합니다."""
     try:
         messages = req.input.get('messages') or []
         # direct call to agent-chat
@@ -249,9 +282,9 @@ async def conversational_tutor(req: GenericRequest):
 async def analyze_mistake(req: GenericRequest):
     try:
         prompt = req.input.get('prompt')
-        url = f"{AZURE_ENDPOINT}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions?api-version=2024-06-01"
+        url = f"{AZURE_ENDPOINT}/openai/deployments/{AZURE_DEPLOYMENT}/chat/completions?api-version={AZURE_API_VERSION}"
         body = {"messages": [{"role":"user","content": prompt}], "max_tokens": 1000}
-        resp = requests.post(url, headers=headers, json=body, timeout=120)
+        resp = requests.post(url, headers=_azure_headers(), json=body, timeout=120)
         resp.raise_for_status()
         data = resp.json()
         raw, parsed = _extract_model_content(data)

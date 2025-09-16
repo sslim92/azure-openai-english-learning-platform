@@ -1,10 +1,9 @@
-
 "use server";
 
 // Avoid requiring @types/node in the repo; runtime access is guarded below
 declare const process: any;
 
-import { getQuestions, type Question, addQuestions, addUserMistake, type UserMistake, getAvailableMonths } from '@/lib/data';
+import { getQuestions, getQuestionById, type Question, addQuestions, addUserMistake, type UserMistake, getAvailableMonths } from '@/lib/data';
 // NOTE: AI calls are proxied to a local Python FastAPI server (see ai_server/).
 const AI_SERVER_BASE = process?.env?.AI_SERVER_BASE ?? 'http://localhost:8001';
 
@@ -80,7 +79,8 @@ export async function processUserMistake(input: {
     userReason: string;
 }) {
     try {
-        const mistakeRecord: UserMistake = {
+    // DB에 저장할 오답 기록 형태로 매핑 (data.ts의 UserMistake 시그니처와 동일)
+    const mistakeRecord: UserMistake = {
             userId: input.userId,
             questionId: input.questionId,
             selectedOptionKey: input.selectedOptionId,
@@ -104,17 +104,41 @@ export async function processUserMistake(input: {
           const text = await resp.text().catch(() => '');
           throw new Error(`AI server error: ${resp.status} ${text}`);
         }
-        const aiResult = await resp.json().catch(() => ({}));
+        const aiResult = await resp.json().catch(() => ({} as any));
 
+        // AI 서버가 반환한 신규 문항을 Question 형태로 가정하고 DB 배치 API 형식으로 분해
         const newQuestion = aiResult.generatedQuestion as Question;
-  await addQuestions([newQuestion]);
-  await safeRevalidatePath('/questions');
-  await safeRevalidatePath('/random-quiz');
+        if (!newQuestion || !newQuestion.id) {
+          throw new Error('AI server did not return a valid generatedQuestion');
+        }
+        const questionRecord: Omit<Question, 'options'> = {
+          id: newQuestion.id,
+          year: newQuestion.year,
+          month: newQuestion.month,
+          intent: newQuestion.intent,
+          topic: newQuestion.topic,
+          questionText: newQuestion.questionText,
+          passage: newQuestion.passage,
+          correctOptionId: newQuestion.correctOptionId,
+          explanation: newQuestion.explanation,
+          difficulty: newQuestion.difficulty,
+          listeningScript: newQuestion.listeningScript,
+          generationReason: newQuestion.generationReason,
+        };
+        const optionsRecords = (newQuestion.options ?? []).map(o => ({
+          questionId: newQuestion.id,
+          id: o.id,
+          text: o.text,
+        }));
+
+        await addQuestions([questionRecord], optionsRecords);
+        await safeRevalidatePath('/questions');
+        await safeRevalidatePath('/random-quiz');
 
         return {
             success: true,
             analysis: aiResult.weaknessAnalysis,
-            newQuestion: { ...newQuestionData, options: newOptionsData.map(o => ({ id: o.id, text: o.text })) } as Question,
+            newQuestion,
         };
 
     } catch (error) {
@@ -144,15 +168,39 @@ export async function createSimilarQuestion(originalQuestion: Question) {
           const text = await resp.text().catch(() => '');
           throw new Error(`AI server error: ${resp.status} ${text}`);
         }
-        const newQuestion = await resp.json().catch(() => ({}));
+        const newQuestion = await resp.json().catch(() => ({} as any));
 
-  await addQuestions([newQuestion as Question]);
-  await safeRevalidatePath('/questions');
-  await safeRevalidatePath('/random-quiz');
+        const q = newQuestion as Question;
+        if (!q || !q.id) {
+          throw new Error('AI server did not return a valid question');
+        }
+        const questionRecord: Omit<Question, 'options'> = {
+          id: q.id,
+          year: q.year,
+          month: q.month,
+          intent: q.intent,
+          topic: q.topic,
+          questionText: q.questionText,
+          passage: q.passage,
+          correctOptionId: q.correctOptionId,
+          explanation: q.explanation,
+          difficulty: q.difficulty,
+          listeningScript: q.listeningScript,
+          generationReason: q.generationReason,
+        };
+        const optionsRecords = (q.options ?? []).map(o => ({
+          questionId: q.id,
+          id: o.id,
+          text: o.text,
+        }));
+
+        await addQuestions([questionRecord], optionsRecords);
+        await safeRevalidatePath('/questions');
+        await safeRevalidatePath('/random-quiz');
 
         return {
             success: true,
-            newQuestion: { ...newQuestionData, options: newOptionsData.map(o => ({ id: o.id, text: o.text })) } as Question,
+            newQuestion: q,
         };
     } catch (error) {
         console.error("Error generating similar question:", error);
@@ -169,7 +217,7 @@ export async function fetchAllQuestions(): Promise<Question[]> {
 }
 
 export async function fetchQuestionById(id: string): Promise<Question | null> {
-    return getQuestionByIdFromDb(id);
+  return getQuestionById(id);
 }
 
 
