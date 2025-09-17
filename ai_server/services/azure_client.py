@@ -13,7 +13,7 @@ from typing import Dict, List, Any, Optional, Tuple
 import requests
 from fastapi import HTTPException
 
-from core.config import (
+from ai_server.core.config import (
     AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION,
     AZURE_TTS_ENDPOINT, AZURE_TTS_API_KEY, AZURE_TTS_DEPLOYMENT, AZURE_TTS_API_VERSION, AZURE_TTS_VOICE
 )

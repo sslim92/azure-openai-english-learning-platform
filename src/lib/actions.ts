@@ -79,122 +79,126 @@ export async function processUserMistake(input: {
     userReason: string;
 }) {
     try {
-    // DB에 저장할 오답 기록 형태로 매핑 (data.ts의 UserMistake 시그니처와 동일)
-    const mistakeRecord: UserMistake = {
+        // DB에 저장할 오답 기록 형태로 매핑 (data.ts의 UserMistake 시그니처와 동일)
+        const mistakeRecord: UserMistake = {
             userId: input.userId,
             questionId: input.questionId,
             selectedOptionKey: input.selectedOptionId,
             reason: input.userReason,
         };
-  await addUserMistake(mistakeRecord);
-  await safeRevalidatePath('/progress');
+        await addUserMistake(mistakeRecord);
+        await safeRevalidatePath('/progress');
 
-    const aiInputObj = {
-      questionContext: input.questionContext,
-      userAnswerText: input.selectedOptionText,
-      userReason: input.userReason,
-    };
-    // Convert ai input object into a readable prompt string for the backend
-    const aiPrompt = `questionContext: ${aiInputObj.questionContext}\nuserAnswerText: ${aiInputObj.userAnswerText}\nuserReason: ${aiInputObj.userReason}`;
-        // call python AI server to analyze mistake and generate question
-        const resp = await fetch(`${AI_SERVER_BASE}/v1/analyze-mistake`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: { prompt: aiPrompt } }),
+        // AI 분석용 프롬프트 구성
+        const analysisPrompt = `
+문제 분석 요청:
+
+문제 정보:
+${input.questionContext}
+
+학생이 선택한 답: ${input.selectedOptionText}
+학생의 선택 이유: ${input.userReason}
+
+위 정보를 바탕으로 학생의 오답 원인을 분석하고, 어떤 영어 개념에서 약점이 있는지 파악해주세요.
+        `.trim();
+
+        // analyzer 에이전트를 통한 오답 분석
+        const analysisResp = await fetch(`${AI_SERVER_BASE}/v1/agent-chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                agent: 'analyzer',
+                messages: [{ role: 'user', content: analysisPrompt }],
+                context: {
+                    questionContext: input.questionContext,
+                },
+                temperature: 0.2,
+            }),
         });
-        if (!resp.ok) {
-          const text = await resp.text().catch(() => '');
-          throw new Error(`AI server error: ${resp.status} ${text}`);
-        }
-        const aiResult = await resp.json().catch(() => ({} as any));
 
-        // AI 서버가 반환한 신규 문항을 Question 형태로 가정하고 DB 배치 API 형식으로 분해
-        const newQuestion = aiResult.generatedQuestion as Question;
-        if (!newQuestion || !newQuestion.id) {
-          throw new Error('AI server did not return a valid generatedQuestion');
+        if (!analysisResp.ok) {
+            const text = await analysisResp.text().catch(() => '');
+            throw new Error(`AI server error: ${analysisResp.status} ${text}`);
         }
-        const questionRecord: Omit<Question, 'options'> = {
-          id: newQuestion.id,
-          year: newQuestion.year,
-          month: newQuestion.month,
-          intent: newQuestion.intent,
-          topic: newQuestion.topic,
-          questionText: newQuestion.questionText,
-          passage: newQuestion.passage,
-          correctOptionId: newQuestion.correctOptionId,
-          explanation: newQuestion.explanation,
-          difficulty: newQuestion.difficulty,
-          listeningScript: newQuestion.listeningScript,
-          generationReason: newQuestion.generationReason,
-        };
-        const optionsRecords = (newQuestion.options ?? []).map(o => ({
-          questionId: newQuestion.id,
-          id: o.id,
-          text: o.text,
-        }));
 
-        await addQuestions([questionRecord], optionsRecords);
-        await safeRevalidatePath('/questions');
-        await safeRevalidatePath('/random-quiz');
+        const analysisResult = await analysisResp.json().catch(() => ({}));
+        const analysis = analysisResult?.message || "분석을 완료했습니다.";
+
+        // 원본 문제 정보에서 새로운 문제 생성
+        const originalQuestion = await getQuestionById(input.questionId);
+        if (!originalQuestion) {
+            throw new Error('Original question not found');
+        }
+
+        const generationResult = await createSimilarQuestion(originalQuestion);
+        if (!generationResult.success || !generationResult.newQuestion) {
+            throw new Error(generationResult.error || '새로운 문제 생성에 실패했습니다.');
+        }
 
         return {
             success: true,
-            analysis: aiResult.weaknessAnalysis,
-            newQuestion,
+            analysis: analysis,
+            newQuestion: generationResult.newQuestion
         };
 
     } catch (error) {
-        console.error("Error processing user mistake:", error);
-        const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-        return { success: false, error: errorMessage };
+        console.error('Process user mistake failed:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'An unknown error occurred during mistake processing.'
+        };
     }
 }
 
 
 export async function createSimilarQuestion(originalQuestion: Question) {
-     try {
-    const aiInputObj = {
-      topic: originalQuestion.topic,
-      difficulty: originalQuestion.difficulty,
-      questionText: originalQuestion.questionText,
-      correctOptionId: originalQuestion.correctOptionId,
-      explanation: originalQuestion.explanation,
-    };
-    const aiPrompt = `topic: ${aiInputObj.topic}\ndifficulty: ${aiInputObj.difficulty}\nquestionText: ${aiInputObj.questionText}\ncorrectOptionId: ${aiInputObj.correctOptionId}\nexplanation: ${aiInputObj.explanation}`;
+    try {
+        const aiInputObj = {
+            topic: originalQuestion.topic,
+            difficulty: originalQuestion.difficulty,
+            questionText: originalQuestion.questionText,
+            correctOptionId: originalQuestion.correctOptionId,
+            explanation: originalQuestion.explanation,
+        };
 
         const resp = await fetch(`${AI_SERVER_BASE}/v1/generate-similar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: { prompt: aiPrompt } }),
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ input: { prompt: aiInputObj } }),
         });
+        
         if (!resp.ok) {
-          const text = await resp.text().catch(() => '');
-          throw new Error(`AI server error: ${resp.status} ${text}`);
+            const text = await resp.text().catch(() => '');
+            throw new Error(`AI server error: ${resp.status} ${text}`);
         }
+        
         const newQuestion = await resp.json().catch(() => ({} as any));
-
         const q = newQuestion as Question;
+        
         if (!q || !q.id) {
-          throw new Error('AI server did not return a valid question');
+            throw new Error('AI server did not return a valid question');
         }
+        
+        // 데이터베이스에 저장
         const questionRecord: Omit<Question, 'options'> = {
-          id: q.id,
-          year: q.year,
-          month: q.month,
-          intent: q.intent,
-          topic: q.topic,
-          questionText: q.questionText,
-          passage: q.passage,
-          correctOptionId: q.correctOptionId,
-          explanation: q.explanation,
-          difficulty: q.difficulty,
-          listeningScript: q.listeningScript,
-          generationReason: q.generationReason,
+            id: q.id,
+            year: q.year,
+            month: q.month,
+            intent: q.intent,
+            topic: q.topic,
+            questionText: q.questionText,
+            passage: q.passage,
+            correctOptionId: q.correctOptionId,
+            explanation: q.explanation,
+            difficulty: q.difficulty,
+            listeningScript: q.listeningScript,
+            generationReason: q.generationReason,
         };
+        
         const optionsRecords = (q.options ?? []).map(o => ({
-          questionId: q.id,
-          id: o.id,
-          text: o.text,
+            questionId: q.id,
+            id: o.id,
+            text: o.text,
         }));
 
         await addQuestions([questionRecord], optionsRecords);
@@ -205,6 +209,7 @@ export async function createSimilarQuestion(originalQuestion: Question) {
             success: true,
             newQuestion: q,
         };
+        
     } catch (error) {
         console.error("Error generating similar question:", error);
         const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";

@@ -8,9 +8,9 @@ FastAPI 애플리케이션을 생성하고 모든 라우터를 등록합니다.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.agent import router as agent_router
-from api.generation import router as generation_router
-from api.tts import router as tts_router
+from ai_server.api.agent import router as agent_router
+from ai_server.api.generation import router as generation_router
+from ai_server.api.tts import router as tts_router
 
 
 def create_app() -> FastAPI:

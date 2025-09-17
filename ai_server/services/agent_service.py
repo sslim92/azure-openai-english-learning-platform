@@ -10,7 +10,7 @@ from langchain_openai import AzureChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from core.config import (
+from ai_server.core.config import (
     AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_ENDPOINT, 
     AZURE_OPENAI_API_KEY, AZURE_OPENAI_API_VERSION
 )
@@ -103,6 +103,28 @@ class AgentManager:
         """
         
         self.register_agent("tutor", tutor_prompt)
+        
+        # 오답 분석 에이전트
+        analyzer_prompt = """
+너는 영어 학습에서 학생들의 오답을 분석하는 전문 AI 분석가야.
+학생이 문제를 틀렸을 때, 그 이유를 깊이 있게 파악하고 맞춤형 피드백을 제공하는 것이 너의 역할이야.
+
+# 분석 원칙
+1. **원인 규명:** 단순히 정답을 알려주지 말고, 왜 그런 선택을 했는지 근본 원인을 찾아.
+2. **개념 연결:** 틀린 부분이 어떤 영어 개념(문법, 어휘, 독해 등)과 연관되는지 명확히 설명해.
+3. **학습 방향 제시:** 이 약점을 보완하기 위해 어떤 학습이 필요한지 구체적으로 안내해.
+4. **격려와 동기부여:** 실수는 성장의 기회라는 관점으로 학생을 격려해.
+
+# 응답 형식
+1. **오답 원인 분석** (2-3문장)
+2. **관련 개념 설명** (2-3문장) 
+3. **학습 개선 방향** (2-3문장)
+4. **격려 메시지** (1-2문장)
+
+항상 한국어로 따뜻하고 전문적인 어조로 답변해.
+        """
+        
+        self.register_agent("analyzer", analyzer_prompt)
     
     def register_agent(self, name: str, system_prompt: str, temperature: float = 0.2):
         """

@@ -7,8 +7,8 @@ AI 튜터와의 대화 기능을 제공하는 엔드포인트들을 정의합니
 from fastapi import APIRouter, HTTPException
 from typing import Optional
 
-from core.schemas import AgentChatRequest
-from services.agent_service import agent_manager, build_message_history
+from ai_server.core.schemas import AgentChatRequest
+from ai_server.services.agent_service import agent_manager, build_message_history
 
 
 router = APIRouter(prefix="/v1", tags=["agent"])
@@ -80,39 +80,6 @@ async def agent_chat(request: AgentChatRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"에이전트 채팅 처리 중 오류: {str(e)}")
-
-
-@router.post("/conversational-tutor")
-async def conversational_tutor(request: dict):
-    """
-    대화형 튜터 (레거시 호환성)
-    
-    Args:
-        request: 요청 데이터 (messages 필드 포함)
-        
-    Returns:
-        튜터 응답 메시지
-    """
-    try:
-        # 메시지 추출
-        messages = request.get("messages", [])
-        
-        # AgentChatRequest로 변환하여 재사용
-        agent_request = AgentChatRequest(
-            agent="tutor",
-            messages=messages
-        )
-        
-        # 기존 agent_chat 엔드포인트 재사용
-        result = await agent_chat(agent_request)
-        
-        # 레거시 형식으로 응답 (문자열만 반환)
-        return result.get("message", "")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"대화형 튜터 처리 중 오류: {str(e)}")
 
 
 @router.get("/agents")
