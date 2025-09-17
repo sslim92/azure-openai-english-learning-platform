@@ -23,10 +23,11 @@ function QuestionLoadingSkeleton() {
 }
 
 
-export default function QuestionPage({ params }: { params: { id: string } }) {
+export default async function QuestionPage({ params }: { params: Promise<{ id: string }> }) {
   
   const Page = async () => {
-    const question = await getQuestionById(params.id);
+    const resolvedParams = await params;
+    const question = await getQuestionById(resolvedParams.id);
 
     if (!question) {
       notFound();

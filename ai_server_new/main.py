@@ -3,17 +3,14 @@ AI 서버 메인 애플리케이션
 
 FastAPI 애플리케이션을 생성하고 모든 라우터를 등록합니다.
 메기스터디 AI 영어 학습 서비스의 백엔드 API 서버입니다.
-
-레거시 호환성을 위해 기존 구조를 유지하면서 내부적으로는 
-새로운 구조의 서비스들을 사용합니다.
 """
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers.tts import router as tts_router
-from .routers.agent import router as agent_router
-from .routers.generation import router as generation_router
+from .api.agent import router as agent_router
+from .api.generation import router as generation_router
+from .api.tts import router as tts_router
 
 
 def create_app() -> FastAPI:
@@ -25,14 +22,14 @@ def create_app() -> FastAPI:
     """
     # FastAPI 앱 생성
     app = FastAPI(
-        title="메기스터디 AI 서버 (레거시)",
+        title="메기스터디 AI 서버",
         description="영어 학습을 위한 AI 튜터, 문제 생성, TTS 서비스를 제공합니다.",
-        version="1.0.0 (호환성 유지)",
+        version="2.0.0",
         docs_url="/docs",
         redoc_url="/redoc"
     )
     
-    # CORS 미들웨어 설정
+    # CORS 미들웨어 설정 (필요시)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # 프로덕션에서는 구체적인 도메인으로 제한
@@ -41,10 +38,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     
-    # 라우터 등록 (기존 경로 유지)
-    app.include_router(tts_router)
+    # 라우터 등록 (기존 클라이언트와 호환성을 위해 prefix 제거)
     app.include_router(agent_router)
     app.include_router(generation_router)
+    app.include_router(tts_router)
     
     # 헬스 체크 엔드포인트
     @app.get("/health")
