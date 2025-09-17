@@ -10,7 +10,7 @@ from langchain_openai import AzureChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from ..core.config import (
+from core.config import (
     AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_ENDPOINT, 
     AZURE_OPENAI_API_KEY, AZURE_OPENAI_API_VERSION
 )

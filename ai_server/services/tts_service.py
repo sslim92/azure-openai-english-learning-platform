@@ -4,7 +4,7 @@ TTS(텍스트 음성 변환) 서비스
 Azure TTS API를 사용하여 텍스트를 음성으로 변환하는 기능을 제공합니다.
 """
 
-from .azure_client import AzureTTSClient
+from services.azure_client import AzureTTSClient
 
 
 class TTSService:

@@ -6,8 +6,8 @@
 
 from fastapi import APIRouter, HTTPException
 
-from ..core.schemas import GenerationRequest
-from ..services.question_service import question_service
+from core.schemas import GenerationRequest
+from services.question_service import question_service
 
 
 router = APIRouter(prefix="/v1", tags=["generation"])

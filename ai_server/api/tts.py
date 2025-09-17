@@ -6,8 +6,8 @@ TTS(텍스트 음성 변환) API 라우터
 
 from fastapi import APIRouter, HTTPException
 
-from ..core.schemas import TTSRequest
-from ..services.tts_service import tts_service
+from core.schemas import TTSRequest
+from services.tts_service import tts_service
 
 
 router = APIRouter(prefix="/v1", tags=["tts"])

@@ -7,8 +7,8 @@ AI 튜터와의 대화 기능을 제공하는 엔드포인트들을 정의합니
 from fastapi import APIRouter, HTTPException
 from typing import Optional
 
-from ..core.schemas import AgentChatRequest
-from ..services.agent_service import agent_manager, build_message_history
+from core.schemas import AgentChatRequest
+from services.agent_service import agent_manager, build_message_history
 
 
 router = APIRouter(prefix="/v1", tags=["agent"])

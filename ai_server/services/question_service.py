@@ -7,8 +7,8 @@ Azure OpenAI를 사용하여 영어 문제 생성 및 오답 분석 기능을 �
 from typing import Dict, Any, Optional
 from pydantic import ValidationError
 
-from ..core.schemas import Question, MistakeAnalysis
-from .azure_client import AzureOpenAIClient
+from core.schemas import Question, MistakeAnalysis
+from services.azure_client import AzureOpenAIClient
 
 
 # JSON 전용 응답을 위한 시스템 지시문
