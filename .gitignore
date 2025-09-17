@@ -44,6 +44,10 @@ next-env.d.ts
 firebase-debug.log
 firestore-debug.log
 
-# Python virtual environments
+# Python virtual environments and cache
 ai_server/.venv/
-ai_server/__pycache__/
+ai_server/**/__pycache__/
+ai_server/**/*.pyc
+ai_server/**/*.pyo
+ai_server/**/*.pyd
+ai_server/**/.Python
