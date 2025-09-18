@@ -70,6 +70,60 @@ export async function textToSpeech(text: string): Promise<{ success: boolean; da
   }
 }
 
+export async function generateCustomExplanation(input: {
+    questionText: string;
+    passage: string;
+    options: Array<{id: string, text: string}>;
+    correctOptionId: string;
+    selectedOptionId: string;
+    originalExplanation: string;
+}) {
+  try {
+    // 맞춤 해설 생성 프롬프트 구성
+    const explanationPrompt = `
+다음 영어 문제에 대해 학생이 오답을 선택했습니다. 학생에게 맞춤형 해설을 제공해주세요.
+
+문제: ${input.questionText}
+본문: ${input.passage}
+선택지: ${input.options.map(o => `${o.id}: ${o.text}`).join('\n')}
+
+정답: ${input.correctOptionId}
+학생이 선택한 답: ${input.selectedOptionId}
+
+기존 해설: ${input.originalExplanation}
+
+위 정보를 바탕으로 학생이 왜 틀렸는지 분석하고, 이해하기 쉬운 맞춤형 해설을 제공해주세요. 
+메기 멘토의 따뜻한 말투로 격려하면서 설명해주세요.
+    `.trim();
+
+    // analyzer 에이전트를 통한 맞춤 해설 생성
+    const resp = await fetch(`${AI_SERVER_BASE}/v1/agent-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent: 'analyzer',
+        messages: [{ role: 'user', content: explanationPrompt }],
+        temperature: 0.3,
+      }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`AI server error: ${resp.status} ${text}`);
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    return { success: true, explanation: data?.message };
+    
+  } catch (error) {
+    console.error('Custom explanation generation failed:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'An unknown error occurred during explanation generation.' 
+    };
+  }
+}
+
 export async function processUserMistake(input: {
     userId: string;
     questionId: string;

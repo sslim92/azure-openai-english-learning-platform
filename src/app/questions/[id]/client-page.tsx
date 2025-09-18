@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -10,7 +9,7 @@ import Link from 'next/link';
 import { ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getTutorResponse, processUserMistake, createSimilarQuestion } from '@/lib/actions';
+import { getTutorResponse, processUserMistake, createSimilarQuestion, generateCustomExplanation } from '@/lib/actions';
 import type { ChatMessage } from '@/components/ai-mentor';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-context';
@@ -61,6 +60,38 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
     setGeneratedQuestionId(null);
   };
 
+  const handleWrongAnswer = async (selectedOptionId: string) => {
+    try {
+      const selectedOption = currentQuestion.options.find(o => o.id === selectedOptionId);
+      const correctOption = currentQuestion.options.find(o => o.id === currentQuestion.correctOptionId);
+      
+      if (!selectedOption || !correctOption) {
+        throw new Error('선택지를 찾을 수 없습니다.');
+      }
+
+      const result = await generateCustomExplanation({
+        questionText: currentQuestion.questionText,
+        passage: currentQuestion.passage,
+        options: currentQuestion.options,
+        correctOptionId: currentQuestion.correctOptionId,
+        selectedOptionId,
+        originalExplanation: currentQuestion.explanation
+      });
+
+      if (result.success && result.explanation) {
+        return `아쉽지만 정답을 살짝 비껴갔네요. 정답은 '${correctOption.text}'입니다.\n\n${result.explanation}\n\n괜찮습니다. 메기도 가끔 물길을 헤매다 길을 찾곤 하죠. 해설을 보고 궁금한 점을 질문하시거나, AI 약점 분석을 받아보세요.`;
+      } else {
+        // Fallback to original explanation
+        return `아쉽지만 정답을 살짝 비껴갔네요. 정답은 '${correctOption.text}'입니다.\n\n해설: ${currentQuestion.explanation}\n\n괜찮습니다. 메기도 가끔 물길을 헤매다 길을 찾곤 하죠. 해설을 보고 궁금한 점을 질문하시거나, AI 약점 분석을 받아보세요.`;
+      }
+    } catch (error) {
+      console.error('AI 설명 생성 중 오류:', error);
+      // Fallback to original explanation
+      const correctOption = currentQuestion.options.find(o => o.id === currentQuestion.correctOptionId);
+      return `아쉽지만 정답을 살짝 비껴갔네요. 정답은 '${correctOption?.text}'입니다.\n\n해설: ${currentQuestion.explanation}\n\n괜찮습니다. 메기도 가끔 물길을 헤매다 길을 찾곤 하죠. 해설을 보고 궁금한 점을 질문하시거나, AI 약점 분석을 받아보세요.`;
+    }
+  };
+
   const handleAnswerSubmit = async (selectedOptionId: string) => {
     setIsSubmitted(true);
     setError(null);
@@ -75,7 +106,9 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
     if (correct) {
       setChatHistory([{ role: 'model', content: '훌륭해요, 이번 물살은 잘 타셨네요! 개념을 확실히 다지기 위해 AI가 만든 유사 문제를 풀어보시겠어요? 또는 궁금한 점이 있다면 질문해주세요.' }]);
     } else {
-      setChatHistory([{ role: 'model', content: `아쉽지만 정답을 살짝 비껴갔네요. 정답은 ‘${currentQuestion.options.find(o => o.id === currentQuestion.correctOptionId)?.text}’입니다.\n\n해설: ${currentQuestion.explanation}\n\n괜찮습니다. 메기도 가끔 물길을 헤매다 길을 찾곤 하죠. 해설을 보고 궁금한 점을 질문하시거나, AI 약점 분석을 받아보세요.` }]);
+      // Generate AI-powered custom explanation for wrong answers
+      const customMessage = await handleWrongAnswer(selectedOptionId);
+      setChatHistory([{ role: 'model', content: customMessage }]);
     }
   };
 
@@ -109,17 +142,21 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
             questionContext: questionContext,
             selectedOptionId: selectedOption.id,
             selectedOptionText: selectedOption.text,
-            userReason: userReason,
+            userReason: userReason
         });
 
-        if (!result.success || !result.analysis || !result.newQuestion) {
-            throw new Error(result.error || '분석 및 문제 생성에 실패했습니다.');
+        if (!result.success) {
+            throw new Error(result.error || 'AI 분석에 실패했습니다.');
         }
 
-        const newAnalysis = `${result.analysis}\n\n이 약점을 넘어서기 위한 새로운 물길을 만들었어요. 아래 버튼을 눌러 새로운 문제에 도전해보세요! 물론, 이 문제에 대해 더 궁금한 점이 있다면 계속 질문하셔도 좋습니다.`;
+        const newAnalysis = result.analysis;
+        
+        // Store analysis for tutor's use
         setAnalysis(result.analysis); // Store original analysis for tutor chat
         setChatHistory(prev => [...prev, {role: 'model', content: newAnalysis}]);
-        setGeneratedQuestionId(result.newQuestion.id);
+        if (result.newQuestion) {
+          setGeneratedQuestionId(result.newQuestion.id);
+        }
         
         toast({
             title: "✅ 맞춤 문제 도착!",
@@ -138,45 +175,59 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
 
   const handleGenerateSimilar = async () => {
     setMentorInteraction('generating');
+    
+    if (!user) {
+        toast({
+            variant: "destructive",
+            title: "로그인 필요",
+            description: "문제 생성 기능을 사용하려면 로그인이 필요합니다.",
+        });
+        router.push('/login');
+        return;
+    }
+
     try {
         const result = await createSimilarQuestion(currentQuestion);
 
-        if (!result.success || !result.newQuestion) {
+        if (!result.success) {
             throw new Error(result.error || '유사 문제 생성에 실패했습니다.');
         }
-        
-        setChatHistory(prev => [...prev, {role: 'model', content: '좋은 흐름이에요! 이 감각을 이어갈 새로운 문제를 준비했습니다. 아래 버튼을 눌러 바로 도전해보세요.'}]);
-        setGeneratedQuestionId(result.newQuestion.id);
-        
+
+        if (result.newQuestion) {
+          setGeneratedQuestionId(result.newQuestion.id);
+        }
+
         toast({
-            title: "✅ 유사 문제 도착!",
-            description: "AI 메기 멘토가 비슷한 유형의 새로운 문제를 만들었습니다.",
+            title: "🎯 새로운 문제 생성 완료!",
+            description: "개념을 한 번 더 확인해보세요!",
         });
 
+        const response = `개념을 다질 수 있는 새로운 문제를 준비했어요! 풀어보실래요?`;
+        setChatHistory(prev => [...prev, { role: 'model', content: response }]);
+        
         setMentorInteraction('generationComplete');
 
     } catch (err) {
-       const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
-       setError(errorMessage);
-       setChatHistory(prev => [...prev, { role: 'model', content: `오류가 발생했습니다: ${errorMessage}` }]);
-       setMentorInteraction('tutoring');
+        const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
+        setError(errorMessage);
+        setChatHistory(prev => [...prev, { role: 'model', content: `문제 생성 중 오류가 발생했습니다: ${errorMessage}` }]);
+        setMentorInteraction('tutoring'); // Allow chatting even on error
     }
-  }
+  };
 
+  const handleTutorSubmit = async (message: string) => {
+    if (!message.trim()) return;
 
-  const handleTutorSubmit = async (userInput: string) => {
-    if (!userInput.trim() || isTutorLoading) return;
-
-    const newHistory: ChatMessage[] = [...chatHistory, { role: 'user', content: userInput }];
-    setChatHistory(newHistory);
     setIsTutorLoading(true);
-    
+    const newHistory: ChatMessage[] = [...chatHistory, { role: 'user', content: message }];
+    setChatHistory(newHistory);
+
     try {
         const questionContext = `
-        - 문제: ${currentQuestion.questionText}
-        - 본문: ${currentQuestion.passage}
-        - 선택지: ${currentQuestion.options.map(o => `${o.id}: ${o.text}`).join(', ')}
-        - 정답: ${currentQuestion.correctOptionId}
+        문제: ${currentQuestion.questionText}
+        본문: ${currentQuestion.passage}
+        선택지: ${currentQuestion.options.map(o => `${o.id}: ${o.text}`).join('\n')}
+        정답: ${currentQuestion.correctOptionId}
         - 해설: ${currentQuestion.explanation}
         `;
         

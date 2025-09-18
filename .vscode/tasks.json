@@ -4,14 +4,7 @@
 		{
 			"label": "Run AI server (dev)",
 			"type": "shell",
-			"command": "uvicorn ai_server.app:app --reload --port 8001",
-			"isBackground": true,
-			"group": "build"
-		},
-		{
-			"label": "Run AI server (dev)",
-			"type": "shell",
-			"command": "uvicorn ai_server.app:app --reload --port 8001",
+			"command": "uvicorn ai_server.main:app --reload --port 8001",
 			"isBackground": true,
 			"group": "build"
 		}
