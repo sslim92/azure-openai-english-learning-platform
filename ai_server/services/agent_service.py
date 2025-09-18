@@ -5,7 +5,7 @@ LangChain을 사용한 AI 에이전트 기능을 제공합니다.
 대화형 튜터 역할을 수행하는 에이전트들을 관리합니다.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from langchain_openai import AzureChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -209,15 +209,49 @@ class AgentManager:
 당신은 영어 학습을 돕는 친근한 도우미입니다.
 
 학생들이 영어 문제를 풀 때 다음과 같이 도움을 제공합니다:
-1. 따뜻한 격려와 응원
-2. 학습에 도움이 되는 간단한 설명
-3. 다음 학습을 위한 조언
+1. 학습에 도움이 되는 이해가 쉽게 자세한 설명
+2. 다음 학습을 위한 조언
 
 항상 긍정적이고 건설적인 톤으로 응답하세요.
 메기스터디의 따뜻한 분위기로 한국어로 답변해주세요.
         """
         
         self.register_agent("analyzer", analyzer_prompt)
+        
+        # 문제 생성 에이전트
+        generator_prompt = """
+당신은 영어 문제 생성 전문가입니다.
+
+주어진 요구사항에 따라 고품질의 영어 문제를 생성합니다.
+JSON 형태로 정확한 형식에 맞춰 응답해주세요.
+
+문제 생성시 고려사항:
+1. 난이도 적정성
+2. 명확한 선택지 구분
+3. 교육적 가치
+4. 실제 수능 스타일
+
+항상 유효한 JSON 형태로만 응답하세요.
+        """
+        
+        self.register_agent("generator", generator_prompt)
+        
+        # 맞춤 해설 생성 에이전트  
+        explanation_prompt = """
+당신은 영어 문제 해설 전문가입니다.
+
+학생의 오답을 분석하여 맞춤형 해설을 제공합니다.
+메기스터디의 따뜻한 톤으로 학습자의 이해를 돕는 설명을 제공하세요.
+
+해설 구성:
+1. 오답을 선택하게 유도한 이유 분석
+2. 오답이 왜 틀렸고 정답 문항이 왜 정답인지 이해가 쉽게 설명
+3. 학습 팁 제공
+
+친근하고 이해하기 쉬운 한국어로 답변하세요.
+        """
+        
+        self.register_agent("explanation", explanation_prompt)
     
     def register_agent(self, name: str, system_prompt: str, temperature: float = 0.2):
         """
@@ -245,6 +279,81 @@ class AgentManager:
     def list_agents(self) -> List[str]:
         """등록된 에이전트 목록 반환"""
         return list(self.agents.keys())
+    
+    async def get_agent_response(
+        self, 
+        agent_name: str, 
+        user_input: str, 
+        context: Optional[Dict[str, Any]] = None,
+        temperature: Optional[float] = None
+    ) -> str:
+        """
+        통합 에이전트 응답 생성
+        
+        Args:
+            agent_name: 사용할 에이전트 이름
+            user_input: 사용자 입력 또는 요청
+            context: 추가 컨텍스트 정보
+            temperature: 응답 창의성 수준
+            
+        Returns:
+            에이전트 응답
+        """
+        agent = self.get_agent(agent_name)
+        if not agent:
+            raise ValueError(f"에이전트 '{agent_name}'를 찾을 수 없습니다.")
+        
+        # 온도 설정이 있으면 적용
+        if temperature is not None:
+            agent.temperature = temperature
+        
+        # 컨텍스트가 있으면 메시지 히스토리에 추가
+        message_history = []
+        if context:
+            from langchain_core.messages import SystemMessage
+            context_msg = f"추가 컨텍스트: {context}"
+            message_history.append(SystemMessage(content=context_msg))
+        
+        return await agent.chat(user_input, message_history)
+    
+    async def generate_question(self, requirements: Dict[str, Any]) -> str:
+        """
+        문제 생성 요청
+        
+        Args:
+            requirements: 문제 생성 요구사항
+            
+        Returns:
+            생성된 문제 (JSON 형태)
+        """
+        prompt = f"다음 요구사항에 맞는 영어 문제를 JSON 형태로 생성해주세요: {requirements}"
+        return await self.get_agent_response("generator", prompt, temperature=0.3)
+    
+    async def analyze_mistake(self, question_data: Dict[str, Any]) -> str:
+        """
+        오답 분석 요청
+        
+        Args:
+            question_data: 문제 및 오답 정보
+            
+        Returns:
+            분석 결과 및 맞춤 해설
+        """
+        import json
+        return await self.get_agent_response("analyzer", json.dumps(question_data), temperature=0.3)
+    
+    async def generate_explanation(self, explanation_data: Dict[str, Any]) -> str:
+        """
+        맞춤 해설 생성 요청
+        
+        Args:
+            explanation_data: 해설 생성에 필요한 데이터
+            
+        Returns:
+            맞춤형 해설
+        """
+        prompt = f"다음 정보를 바탕으로 맞춤 해설을 제공해주세요: {explanation_data}"
+        return await self.get_agent_response("explanation", prompt, temperature=0.2)
 
 
 def build_message_history(messages: List[Dict], system_prefix: Optional[str] = None) -> List[BaseMessage]:

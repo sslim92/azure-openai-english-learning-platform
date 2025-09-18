@@ -8,7 +8,7 @@
 from fastapi import APIRouter, HTTPException
 
 from ai_server.core.schemas import GenerationRequest
-from ai_server.services.question_service import question_service
+from ai_server.services.agent_service import agent_manager
 
 
 router = APIRouter(prefix="/v1", tags=["generation"])
@@ -29,8 +29,12 @@ async def generate_similar_question(request: GenerationRequest):
         생성된 문제 데이터 또는 원본 응답
     """
     try:
-        result = await question_service.generate_similar_question(request.input)
-        return result
+        # 통합된 agent_service를 통한 문제 생성
+        result = await agent_manager.generate_question({
+            "type": "similar_question",
+            "input": request.input
+        })
+        return {"message": result}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"유사 문제 생성 중 오류: {str(e)}")

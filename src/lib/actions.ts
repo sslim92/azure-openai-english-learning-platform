@@ -144,27 +144,32 @@ export async function generateCustomExplanation(input: {
   }
 }
 
-export async function processUserMistake(input: {
+// 새로운 함수: 사용자 답변 저장 + AI 분석 (유사 문제 생성 제거)
+export async function saveUserAnswer(input: {
     userId: string;
     questionId: string;
     questionContext: string;
     selectedOptionId: string;
     selectedOptionText: string;
     userReason: string;
+    isCorrect: boolean;
 }) {
     try {
-        // DB에 저장할 오답 기록 형태로 매핑 (data.ts의 UserMistake 시그니처와 동일)
-        const mistakeRecord: UserMistake = {
-            userId: input.userId,
-            questionId: input.questionId,
-            selectedOptionKey: input.selectedOptionId,
-            reason: input.userReason,
-        };
-        await addUserMistake(mistakeRecord);
-        await safeRevalidatePath('/progress');
+        // 오답일 때만 DB에 저장
+        if (!input.isCorrect) {
+            const mistakeRecord: UserMistake = {
+                userId: input.userId,
+                questionId: input.questionId,
+                selectedOptionKey: input.selectedOptionId,
+                reason: input.userReason,
+            };
+            await addUserMistake(mistakeRecord);
+            await safeRevalidatePath('/progress');
+        }
 
-        // AI 분석용 프롬프트 구성
-        const analysisPrompt = `
+        // 오답일 때만 AI 분석 수행
+        if (!input.isCorrect) {
+            const analysisPrompt = `
 문제 분석 요청:
 
 문제 정보:
@@ -174,31 +179,73 @@ ${input.questionContext}
 학생의 선택 이유: ${input.userReason}
 
 위 정보를 바탕으로 학생의 오답 원인을 분석하고, 어떤 영어 개념에서 약점이 있는지 파악해주세요.
-        `.trim();
+            `.trim();
 
-        // analyzer 에이전트를 통한 오답 분석
-        const analysisResp = await fetch(`${AI_SERVER_BASE}/v1/agent-chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                agent: 'analyzer',
-                messages: [{ role: 'user', content: analysisPrompt }],
-                context: {
-                    questionContext: input.questionContext,
-                },
-                temperature: 0.2,
-            }),
-        });
+            const analysisResp = await fetch(`${AI_SERVER_BASE}/v1/agent-chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent: 'analyzer',
+                    messages: [{ role: 'user', content: analysisPrompt }],
+                    context: {
+                        questionContext: input.questionContext,
+                    },
+                    temperature: 0.2,
+                }),
+            });
 
-        if (!analysisResp.ok) {
-            const text = await analysisResp.text().catch(() => '');
-            throw new Error(`AI server error: ${analysisResp.status} ${text}`);
+            if (!analysisResp.ok) {
+                const text = await analysisResp.text().catch(() => '');
+                throw new Error(`AI server error: ${analysisResp.status} ${text}`);
+            }
+
+            const analysisResult = await analysisResp.json().catch(() => ({}));
+            const analysis = analysisResult?.message || "분석을 완료했습니다.";
+
+            return {
+                success: true,
+                analysis: analysis,
+                isCorrect: false
+            };
         }
 
-        const analysisResult = await analysisResp.json().catch(() => ({}));
-        const analysis = analysisResult?.message || "분석을 완료했습니다.";
+        // 정답일 때
+        return {
+            success: true,
+            analysis: "정답입니다! 잘하셨어요.",
+            isCorrect: true
+        };
 
-        // 원본 문제 정보에서 새로운 문제 생성
+    } catch (error) {
+        console.error('Save user answer failed:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'An unknown error occurred during answer processing.'
+        };
+    }
+}
+
+// 기존 함수 유지 (하위 호환성을 위해)
+export async function processUserMistake(input: {
+    userId: string;
+    questionId: string;
+    questionContext: string;
+    selectedOptionId: string;
+    selectedOptionText: string;
+    userReason: string;
+}) {
+    try {
+        // 새로운 함수 호출
+        const saveResult = await saveUserAnswer({
+            ...input,
+            isCorrect: false // 이 함수는 오답 처리용이므로 항상 false
+        });
+
+        if (!saveResult.success) {
+            throw new Error(saveResult.error || 'Answer save failed');
+        }
+
+        // 유사 문제 생성은 별도로 유지
         const originalQuestion = await getQuestionById(input.questionId);
         if (!originalQuestion) {
             throw new Error('Original question not found');
@@ -211,7 +258,7 @@ ${input.questionContext}
 
         return {
             success: true,
-            analysis: analysis,
+            analysis: saveResult.analysis,
             newQuestion: generationResult.newQuestion
         };
 

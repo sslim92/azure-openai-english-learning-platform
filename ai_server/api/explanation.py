@@ -6,14 +6,9 @@
 
 from fastapi import APIRouter, HTTPException
 from ai_server.core.schemas import ExplanationRequest, ExplanationResponse
-from ai_server.services.explanation_service import ExplanationService
-from ai_server.services.azure_client import AzureOpenAIClient
+from ai_server.services.agent_service import agent_manager
 
 router = APIRouter()
-
-# 전역 서비스 인스턴스
-azure_client = AzureOpenAIClient()
-explanation_service = ExplanationService(azure_client)
 
 
 @router.post("/custom-explanation", response_model=ExplanationResponse)
@@ -28,14 +23,17 @@ async def generate_custom_explanation(request: ExplanationRequest):
         AI가 생성한 맞춤 해설
     """
     try:
-        custom_explanation = await explanation_service.generate_custom_explanation(
-            question_text=request.questionText,
-            passage=request.passage,
-            options=request.options,
-            correct_option_id=request.correctOptionId,
-            selected_option_id=request.selectedOptionId,
-            explanation=request.explanation
-        )
+        # 통합된 agent_service를 통한 해설 생성
+        explanation_data = {
+            "questionText": request.questionText,
+            "passage": request.passage, 
+            "options": [{"id": opt.id, "text": opt.text} for opt in request.options],
+            "correctOptionId": request.correctOptionId,
+            "selectedOptionId": request.selectedOptionId,
+            "explanation": request.explanation
+        }
+        
+        custom_explanation = await agent_manager.generate_explanation(explanation_data)
         
         return ExplanationResponse(customExplanation=custom_explanation)
         

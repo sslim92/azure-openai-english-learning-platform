@@ -9,7 +9,7 @@ import Link from 'next/link';
 import { ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getTutorResponse, processUserMistake, createSimilarQuestion, generateCustomExplanation } from '@/lib/actions';
+import { getTutorResponse, saveUserAnswer, createSimilarQuestion, generateCustomExplanation } from '@/lib/actions';
 import type { ChatMessage } from '@/components/ai-mentor';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-context';
@@ -136,34 +136,36 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
 
     try {
         const questionContext = `문제: ${currentQuestion.questionText}\n본문: ${currentQuestion.passage}\n선택지: ${currentQuestion.options.map(o => `${o.id}: ${o.text}`).join('\n')}\n정답: ${currentQuestion.correctOptionId}`;
-        const result = await processUserMistake({
-            userId: user.uid, // This needs to be the UserId from your Users table
+        
+        // 새로운 saveUserAnswer 함수 사용 (오답 저장 + AI 분석만)
+        const isCorrect = selectedOption.id === currentQuestion.correctOptionId;
+        const analysisResult = await saveUserAnswer({
+            userId: user.uid,
             questionId: currentQuestion.id,
             questionContext: questionContext,
             selectedOptionId: selectedOption.id,
             selectedOptionText: selectedOption.text,
-            userReason: userReason
+            userReason: userReason,
+            isCorrect: isCorrect
         });
 
-        if (!result.success) {
-            throw new Error(result.error || 'AI 분석에 실패했습니다.');
+        if (!analysisResult.success) {
+            throw new Error(analysisResult.error || 'AI 분석에 실패했습니다.');
         }
 
-        const newAnalysis = result.analysis;
+        const newAnalysis = analysisResult.analysis;
         
         // Store analysis for tutor's use
-        setAnalysis(result.analysis); // Store original analysis for tutor chat
+        setAnalysis(analysisResult.analysis);
         setChatHistory(prev => [...prev, {role: 'model', content: newAnalysis}]);
-        if (result.newQuestion) {
-          setGeneratedQuestionId(result.newQuestion.id);
-        }
         
+        // 유사 문제 생성은 별도 버튼으로 처리하도록 변경
         toast({
-            title: "✅ 맞춤 문제 도착!",
-            description: "AI 메기 멘토가 새로운 성장의 기회를 만들었습니다.",
+            title: "✅ 분석 완료!",
+            description: "AI 메기 멘토가 답변을 분석했습니다. 유사 문제가 필요하면 아래 버튼을 눌러주세요.",
         });
 
-        setMentorInteraction('generationComplete');
+        setMentorInteraction('tutoring'); // 채팅 가능한 상태로 변경
 
     } catch (err) {
        const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
