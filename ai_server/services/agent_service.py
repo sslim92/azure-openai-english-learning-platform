@@ -55,7 +55,7 @@ class ChatAgent:
         사용자 입력에 대한 에이전트 응답 생성
         
         Args:
-            user_input: 사용자 입력 텍스트
+            user_input: 사용자 입력 텍스트 (JSON 형태일 수 있음)
             message_history: 이전 대화 기록
             
         Returns:
@@ -66,16 +66,116 @@ class ChatAgent:
             if hasattr(self.llm, 'temperature'):
                 self.llm.temperature = self.temperature
             
+            # analyzer 에이전트이고 JSON 입력인 경우 특별 처리
+            if self.name == "analyzer" and user_input.strip().startswith('{'):
+                try:
+                    processed_input = self._process_analyzer_input(user_input)
+                    print(f"Processed analyzer input: {processed_input[:100]}...")  # 디버그 로그 단축
+                except Exception as e:
+                    print(f"JSON 처리 오류: {e}")
+                    processed_input = "영어 학습에 대한 격려와 응원을 부탁합니다."
+            else:
+                # 일반적인 입력 처리
+                processed_input = user_input
+            
             # 대화 체인 실행
             result = await self.chain.ainvoke({
-                "input": user_input,
+                "input": processed_input,
                 "history": message_history
             })
             
             return getattr(result, "content", str(result))
             
         except Exception as e:
-            raise Exception(f"에이전트 채팅 처리 중 오류: {str(e)}")
+            error_msg = str(e)
+            print(f"Chat 메서드 오류: {error_msg}")
+            
+            # 콘텐츠 필터 오류인 경우 특별 처리
+            if "content_filter" in error_msg or "ResponsibleAIPolicyViolation" in error_msg:
+                # 매우 안전한 fallback 시도
+                try:
+                    safe_result = await self.chain.ainvoke({
+                        "input": "학습자에게 격려 메시지를 제공해주세요.",
+                        "history": message_history
+                    })
+                    return getattr(safe_result, "content", str(safe_result))
+                except:
+                    # 그래도 실패하면 하드코딩된 메시지 반환
+                    return "좋은 시도였어요! 계속 열심히 학습해보세요. 메기가 응원하고 있어요!"
+            
+            raise Exception(f"에이전트 채팅 처리 중 오류: {error_msg}")
+    
+    def _process_analyzer_input(self, json_input: str) -> str:
+        """
+        analyzer 에이전트용 JSON 입력 처리
+        
+        Args:
+            json_input: JSON 형태의 문제 데이터
+            
+        Returns:
+            구조화된 프롬프트 텍스트
+        """
+        import json
+        
+        try:
+            data = json.loads(json_input)
+            
+            # JSON 데이터에서 필요한 정보 추출
+            question_text = data.get('questionText', '')
+            passage = data.get('passage', '')
+            options = data.get('options', [])
+            correct_option_id = data.get('correctOptionId', '')
+            selected_option_id = data.get('selectedOptionId', '')
+            original_explanation = data.get('originalExplanation', '')
+            
+            # 선택지에서 텍스트 찾기
+            selected_option_text = ""
+            correct_option_text = ""
+            for option in options:
+                if option.get('id') == selected_option_id:
+                    selected_option_text = option.get('text', '')
+                if option.get('id') == correct_option_id:
+                    correct_option_text = option.get('text', '')
+            
+            # 선택지 목록 생성
+            options_text = []
+            for opt in options:
+                option_id = opt.get('id', '')
+                option_text = opt.get('text', '')
+                options_text.append(f"{option_id}: {option_text}")
+            options_list = "\n".join(options_text)
+            
+            # 구조화된 프롬프트 생성 (중괄호 없이)
+            prompt_parts = [
+                "영어 학습 도움을 요청합니다:",
+                "",
+                f"문제: {question_text}",
+            ]
+            
+            if passage:
+                prompt_parts.append(f"지문: {passage}")
+                prompt_parts.append("")
+            
+            prompt_parts.extend([
+                "선택지:",
+                options_list,
+                "",
+                f"정답: {correct_option_id} ({correct_option_text})",
+                f"학생 선택: {selected_option_id} ({selected_option_text})",
+                "",
+                f"해설: {original_explanation}",
+                "",
+                "학습 도움과 격려 메시지를 제공해주세요."
+            ])
+            
+            return "\n".join(prompt_parts)
+            
+        except json.JSONDecodeError as e:
+            print(f"JSON 파싱 오류: {e}")
+            return "영어 학습에 대한 격려와 응원 메시지를 제공해주세요."
+        except Exception as e:
+            print(f"프롬프트 생성 오류: {e}")
+            return "학습자에게 따뜻한 격려와 학습 팁을 제공해주세요."
 
 
 class AgentManager:
@@ -104,24 +204,17 @@ class AgentManager:
         
         self.register_agent("tutor", tutor_prompt)
         
-        # 오답 분석 에이전트
+        # 학습 도우미 에이전트
         analyzer_prompt = """
-너는 영어 학습에서 학생들의 오답을 분석하는 전문 AI 분석가야.
-학생이 문제를 틀렸을 때, 그 이유를 깊이 있게 파악하고 맞춤형 피드백을 제공하는 것이 너의 역할이야.
+당신은 영어 학습을 돕는 친근한 도우미입니다.
 
-# 분석 원칙
-1. **원인 규명:** 단순히 정답을 알려주지 말고, 왜 그런 선택을 했는지 근본 원인을 찾아.
-2. **개념 연결:** 틀린 부분이 어떤 영어 개념(문법, 어휘, 독해 등)과 연관되는지 명확히 설명해.
-3. **학습 방향 제시:** 이 약점을 보완하기 위해 어떤 학습이 필요한지 구체적으로 안내해.
-4. **격려와 동기부여:** 실수는 성장의 기회라는 관점으로 학생을 격려해.
+학생들이 영어 문제를 풀 때 다음과 같이 도움을 제공합니다:
+1. 따뜻한 격려와 응원
+2. 학습에 도움이 되는 간단한 설명
+3. 다음 학습을 위한 조언
 
-# 응답 형식
-1. **오답 원인 분석** (2-3문장)
-2. **관련 개념 설명** (2-3문장) 
-3. **학습 개선 방향** (2-3문장)
-4. **격려 메시지** (1-2문장)
-
-항상 한국어로 따뜻하고 전문적인 어조로 답변해.
+항상 긍정적이고 건설적인 톤으로 응답하세요.
+메기스터디의 따뜻한 분위기로 한국어로 답변해주세요.
         """
         
         self.register_agent("analyzer", analyzer_prompt)
