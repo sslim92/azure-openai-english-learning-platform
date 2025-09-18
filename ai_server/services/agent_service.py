@@ -235,23 +235,6 @@ JSON 형태로 정확한 형식에 맞춰 응답해주세요.
         """
         
         self.register_agent("generator", generator_prompt)
-        
-        # 맞춤 해설 생성 에이전트  
-        explanation_prompt = """
-당신은 영어 문제 해설 전문가입니다.
-
-학생의 오답을 분석하여 맞춤형 해설을 제공합니다.
-메기스터디의 따뜻한 톤으로 학습자의 이해를 돕는 설명을 제공하세요.
-
-해설 구성:
-1. 오답을 선택하게 유도한 이유 분석
-2. 오답이 왜 틀렸고 정답 문항이 왜 정답인지 이해가 쉽게 설명
-3. 학습 팁 제공
-
-친근하고 이해하기 쉬운 한국어로 답변하세요.
-        """
-        
-        self.register_agent("explanation", explanation_prompt)
     
     def register_agent(self, name: str, system_prompt: str, temperature: float = 0.2):
         """
@@ -341,19 +324,6 @@ JSON 형태로 정확한 형식에 맞춰 응답해주세요.
         """
         import json
         return await self.get_agent_response("analyzer", json.dumps(question_data), temperature=0.3)
-    
-    async def generate_explanation(self, explanation_data: Dict[str, Any]) -> str:
-        """
-        맞춤 해설 생성 요청
-        
-        Args:
-            explanation_data: 해설 생성에 필요한 데이터
-            
-        Returns:
-            맞춤형 해설
-        """
-        prompt = f"다음 정보를 바탕으로 맞춤 해설을 제공해주세요: {explanation_data}"
-        return await self.get_agent_response("explanation", prompt, temperature=0.2)
 
 
 def build_message_history(messages: List[Dict], system_prefix: Optional[str] = None) -> List[BaseMessage]:
