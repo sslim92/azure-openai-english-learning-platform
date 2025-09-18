@@ -217,24 +217,6 @@ class AgentManager:
         """
         
         self.register_agent("analyzer", analyzer_prompt)
-        
-        # 문제 생성 에이전트
-        generator_prompt = """
-당신은 영어 문제 생성 전문가입니다.
-
-주어진 요구사항에 따라 고품질의 영어 문제를 생성합니다.
-JSON 형태로 정확한 형식에 맞춰 응답해주세요.
-
-문제 생성시 고려사항:
-1. 난이도 적정성
-2. 명확한 선택지 구분
-3. 교육적 가치
-4. 실제 수능 스타일
-
-항상 유효한 JSON 형태로만 응답하세요.
-        """
-        
-        self.register_agent("generator", generator_prompt)
     
     def register_agent(self, name: str, system_prompt: str, temperature: float = 0.2):
         """
@@ -298,19 +280,6 @@ JSON 형태로 정확한 형식에 맞춰 응답해주세요.
             message_history.append(SystemMessage(content=context_msg))
         
         return await agent.chat(user_input, message_history)
-    
-    async def generate_question(self, requirements: Dict[str, Any]) -> str:
-        """
-        문제 생성 요청
-        
-        Args:
-            requirements: 문제 생성 요구사항
-            
-        Returns:
-            생성된 문제 (JSON 형태)
-        """
-        prompt = f"다음 요구사항에 맞는 영어 문제를 JSON 형태로 생성해주세요: {requirements}"
-        return await self.get_agent_response("generator", prompt, temperature=0.3)
     
     async def analyze_mistake(self, question_data: Dict[str, Any]) -> str:
         """

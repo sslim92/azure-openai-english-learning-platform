@@ -24,6 +24,9 @@ AZURE_TTS_DEPLOYMENT = os.getenv("AZURE_OPENAI_TTS_DEPLOYMENT_NAME")
 AZURE_TTS_API_VERSION = os.getenv("AZURE_OPENAI_TTS_API_VERSION", "2025-03-01-preview")
 AZURE_TTS_VOICE = os.getenv("AZURE_OPENAI_TTS_VOICE", "alloy")
 
+# Azure OpenAI 문제 생성 모델 설정
+AZURE_QUESTION_MODEL_DEPLOYMENT = os.getenv("AZURE_QUESTION_MODEL_DEPLOYMENT_NAME")
+
 # 필수 설정값 검증
 def validate_config():
     """필수 환경변수가 설정되어 있는지 확인합니다."""

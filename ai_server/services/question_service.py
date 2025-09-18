@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 from pydantic import ValidationError
 
 from ai_server.core.schemas import Question, MistakeAnalysis
-from ai_server.services.azure_client import AzureOpenAIClient
+from ai_server.services.azure_client import AzureQuestionGenerationClient
 
 
 # JSON 전용 응답을 위한 시스템 지시문
@@ -20,11 +20,14 @@ JSON_INSTRUCTION = (
 
 
 class QuestionGenerationService:
-    """문제 생성 서비스 클래스"""
+    """문제 생성 전용 서비스 클래스"""
     
     def __init__(self):
-        """서비스 초기화"""
-        self.client = AzureOpenAIClient()
+        """
+        서비스 초기화
+        문제 생성 전용 Azure OpenAI 클라이언트를 사용합니다.
+        """
+        self.client = AzureQuestionGenerationClient()
     
     def _format_input_data(self, data: Any) -> str:
         """
@@ -80,9 +83,16 @@ class QuestionGenerationService:
             # 입력 데이터 포맷팅
             formatted_prompt = self._format_input_data(prompt_data.get('prompt'))
             
-            # 시스템 메시지 구성
+            # 문제 생성 전용 시스템 메시지 구성
             system_message = (
-                JSON_INSTRUCTION + 
+                "당신은 고품질 영어 문제 생성 전문가입니다. "
+                "주어진 요구사항에 따라 수능 스타일의 영어 문제를 생성합니다.\n\n"
+                "문제 생성 시 고려사항:\n"
+                "1. 난이도의 적정성과 일관성\n"
+                "2. 명확하고 구분되는 선택지\n"
+                "3. 교육적 가치가 높은 내용\n"
+                "4. 실제 수능 출제 경향 반영\n\n"
+                + JSON_INSTRUCTION + 
                 " Output must conform to the Question schema with fields: "
                 "id, year, month, intent, topic, questionText, passage, "
                 "options[{id,text}], correctOptionId, explanation, "
@@ -90,16 +100,12 @@ class QuestionGenerationService:
                 "generationReason(optional)."
             )
             
-            # API 호출
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": formatted_prompt}
-            ]
-            
-            raw_response, parsed_data = await self.client.chat_completion(
-                messages=messages,
-                max_tokens=512,
-                temperature=0.2
+            # 문제 생성 전용 클라이언트로 API 호출 (단일 요청)
+            raw_response, parsed_data = await self.client.generate_question(
+                system_prompt=system_message,
+                user_prompt=formatted_prompt,
+                max_tokens=1024,  # 문제 생성에는 더 많은 토큰 필요
+                temperature=0.3   # 창의적이지만 일관된 문제 생성
             )
             
             # 파싱된 데이터가 있으면 스키마 검증 시도
@@ -116,59 +122,7 @@ class QuestionGenerationService:
             
         except Exception as e:
             raise Exception(f"문제 생성 중 오류 발생: {str(e)}")
-    
-    async def analyze_mistake(self, prompt_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        오답 분석 및 문제 생성
-        
-        Args:
-            prompt_data: 오답 분석을 위한 입력 데이터
-            
-        Returns:
-            오답 분석 결과 및 생성된 문제 데이터
-        """
-        try:
-            # 입력 데이터 포맷팅
-            formatted_prompt = self._format_input_data(prompt_data.get('prompt'))
-            
-            # 시스템 메시지 구성
-            system_message = (
-                JSON_INSTRUCTION + 
-                " Output must conform to the AnalyzeMistakeResult schema with fields: "
-                "weaknessAnalysis, generatedQuestion (Question schema: "
-                "id, year, month, intent, topic, questionText, passage, "
-                "options[{id,text}], correctOptionId, explanation, "
-                "difficulty=Easy|Medium|Hard, listeningScript(optional), "
-                "generationReason(optional))."
-            )
-            
-            # API 호출
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": formatted_prompt}
-            ]
-            
-            raw_response, parsed_data = await self.client.chat_completion(
-                messages=messages,
-                max_tokens=1000,
-                temperature=0.2
-            )
-            
-            # 파싱된 데이터가 있으면 스키마 검증 시도
-            if parsed_data:
-                try:
-                    analysis = MistakeAnalysis.model_validate(parsed_data)
-                    return analysis.model_dump()
-                except ValidationError:
-                    # 검증 실패시 원본 데이터 반환
-                    pass
-            
-            # 파싱 실패 또는 검증 실패시 원본 응답 반환
-            return {"raw": raw_response}
-            
-        except Exception as e:
-            raise Exception(f"오답 분석 중 오류 발생: {str(e)}")
 
 
-# 전역 서비스 인스턴스
+# 전역 서비스 인스턴스 (문제 생성 전용 모델 사용)
 question_service = QuestionGenerationService()
