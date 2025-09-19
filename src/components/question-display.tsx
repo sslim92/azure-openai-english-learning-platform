@@ -33,8 +33,8 @@ export default function QuestionDisplay({
     setIsGeneratingAudio(true);
     try {
       const result = await textToSpeech(question.listeningScript);
-      if (result.success && result.data) {
-        setAudioDataUri(result.data.audioDataUri);
+      if (result.success && result.audioDataUri) {
+        setAudioDataUri(result.audioDataUri);
       } else {
         throw new Error(result.error || '음성 생성에 실패했습니다.');
       }
