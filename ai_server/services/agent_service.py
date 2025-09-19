@@ -66,14 +66,25 @@ class ChatAgent:
             if hasattr(self.llm, 'temperature'):
                 self.llm.temperature = self.temperature
             
-            # analyzer 에이전트이고 JSON 입력인 경우 특별 처리
-            if self.name == "analyzer" and user_input.strip().startswith('{'):
+            # JSON 입력인 경우 에이전트별 특별 처리
+            if user_input.strip().startswith('{'):
                 try:
-                    processed_input = self._process_analyzer_input(user_input)
-                    print(f"Processed analyzer input: {processed_input[:100]}...")  # 디버그 로그 단축
+                    if self.name == "analyzer":
+                        processed_input = self._process_analyzer_input(user_input)
+                        print(f"Processed analyzer input: {processed_input[:100]}...")  # 디버그 로그 단축
+                    elif self.name == "tutor":
+                        processed_input = self._process_tutor_input(user_input)
+                        print(f"Processed tutor input: {processed_input[:100]}...")  # 디버그 로그 단축
+                    else:
+                        processed_input = user_input
                 except Exception as e:
                     print(f"JSON 처리 오류: {e}")
-                    processed_input = "영어 학습에 대한 격려와 응원을 부탁합니다."
+                    if self.name == "analyzer":
+                        processed_input = "영어 학습에 대한 격려와 응원을 부탁합니다."
+                    elif self.name == "tutor":
+                        processed_input = "학습자와 친근하게 대화를 시작해주세요."
+                    else:
+                        processed_input = user_input
             else:
                 # 일반적인 입력 처리
                 processed_input = user_input
@@ -120,7 +131,12 @@ class ChatAgent:
         try:
             data = json.loads(json_input)
             
-            # JSON 데이터에서 필요한 정보 추출
+            # analysisType이 있는 경우 (saveUserAnswer에서 호출)
+            analysis_type = data.get('analysisType', '')
+            if analysis_type == 'mistake_analysis':
+                return self._process_mistake_analysis(data)
+            
+            # 기존 generateCustomExplanation 형태 처리
             question_text = data.get('questionText', '')
             passage = data.get('passage', '')
             options = data.get('options', [])
@@ -176,6 +192,102 @@ class ChatAgent:
         except Exception as e:
             print(f"프롬프트 생성 오류: {e}")
             return "학습자에게 따뜻한 격려와 학습 팁을 제공해주세요."
+
+    def _process_tutor_input(self, json_input: str) -> str:
+        """
+        tutor 에이전트용 JSON 입력 처리
+        
+        Args:
+            json_input: JSON 형태의 튜터 데이터
+            
+        Returns:
+            구조화된 프롬프트 텍스트
+        """
+        import json
+        
+        try:
+            data = json.loads(json_input)
+            
+            # JSON 데이터에서 필요한 정보 추출
+            question_context = data.get('questionContext', '')
+            analysis = data.get('analysis', '')
+            chat_history = data.get('chatHistory', [])
+            
+            # 프롬프트 구성
+            prompt_parts = [
+                "학습 상담을 시작합니다:",
+                "",
+                "문제 정보:",
+                question_context,
+                "",
+            ]
+            
+            if analysis:
+                prompt_parts.extend([
+                    "분석 결과:",
+                    analysis,
+                    "",
+                ])
+            
+            if chat_history:
+                prompt_parts.extend([
+                    "대화 기록:",
+                ])
+                for msg in chat_history:
+                    role = msg.get('role', 'user')
+                    content = msg.get('content', '')
+                    role_name = "학생" if role == "user" else "메기"
+                    prompt_parts.append(f"{role_name}: {content}")
+                prompt_parts.append("")
+            
+            prompt_parts.extend([
+                "위 정보를 바탕으로 학생과 친근하게 대화해주세요.",
+                "메기의 따뜻한 말투로 격려하고 도움을 제공해주세요."
+            ])
+            
+            return "\n".join(prompt_parts)
+            
+        except json.JSONDecodeError as e:
+            print(f"JSON 파싱 오류: {e}")
+            return "학습자와 친근하게 대화를 시작해주세요."
+        except Exception as e:
+            print(f"프롬프트 생성 오류: {e}")
+            return "학습자에게 따뜻한 격려와 학습 팁을 제공해주세요."
+
+    def _process_mistake_analysis(self, data: dict) -> str:
+        """
+        오답 분석용 JSON 입력 처리 (saveUserAnswer에서 호출)
+        
+        Args:
+            data: JSON 데이터 딕셔너리
+            
+        Returns:
+            구조화된 프롬프트 텍스트
+        """
+        try:
+            question_context = data.get('questionContext', '')
+            selected_option_text = data.get('selectedOptionText', '')
+            user_reason = data.get('userReason', '')
+            
+            # 프롬프트 구성
+            prompt_parts = [
+                "문제 분석 요청:",
+                "",
+                "문제 정보:",
+                question_context,
+                "",
+                f"학생이 선택한 답: {selected_option_text}",
+                f"학생의 선택 이유: {user_reason}",
+                "",
+                "위 정보를 바탕으로 학생의 오답 원인을 분석하고, 어떤 영어 개념에서 약점이 있는지 파악해주세요.",
+                "메기스터디의 따뜻한 분위기로 격려와 함께 분석해주세요."
+            ]
+            
+            return "\n".join(prompt_parts)
+            
+        except Exception as e:
+            print(f"오답 분석 프롬프트 생성 오류: {e}")
+            return "학습자의 오답을 분석하고 격려해주세요."
 
 
 class AgentManager:

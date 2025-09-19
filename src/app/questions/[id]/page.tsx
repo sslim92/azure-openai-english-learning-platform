@@ -23,10 +23,8 @@ function QuestionLoadingSkeleton() {
 }
 
 export default async function QuestionPage({ params }: { params: Promise<{ id: string }> }) {
-  
-  const Page = async () => {
-    const resolvedParams = await params;
-    const question = await getQuestionById(resolvedParams.id);
+  const resolvedParams = await params;
+  const question = await fetchQuestionById(resolvedParams.id);
 
   if (!question) {
     notFound();
@@ -37,5 +35,4 @@ export default async function QuestionPage({ params }: { params: Promise<{ id: s
       <QuestionClientPage initialQuestion={question} />
     </Suspense>
   );
-  
 }
