@@ -208,7 +208,7 @@ class AzureTTSClient:
         """
         endpoint = self.endpoint.strip()
         
-        # 전체 URL이 이미 제공된 경우
+        # 전체 URL이 이미 제공된 경우 (예: .env에서 완전한 URL 설정)
         if "/openai/deployments/" in endpoint and "/audio/speech" in endpoint:
             url = endpoint
             if "api-version=" not in url:
@@ -218,16 +218,18 @@ class AzureTTSClient:
             # URL에서 모델명 추출
             match = re.search(r"/deployments/([^/]+)/audio/speech", url)
             model_name = match.group(1) if match else self.deployment
+            
+            return url, model_name
         else:
-            # URL 조립 필요
+            # URL 조립 필요 (기본 엔드포인트만 제공된 경우)
             if not self.deployment:
                 raise HTTPException(status_code=500, detail="TTS 배포명이 설정되지 않았습니다.")
             
             base_url = endpoint.rstrip("/")
             url = f"{base_url}/openai/deployments/{self.deployment}/audio/speech?api-version={self.api_version}"
             model_name = self.deployment
-        
-        return url, model_name
+            
+            return url, model_name
     
     def synthesize_speech(self, text: str) -> str:
         """
@@ -245,7 +247,7 @@ class AzureTTSClient:
             url, model_name = self._build_url_and_model()
             
             headers = {
-                "Authorization": f"Bearer {self.api_key}",
+                "api-key": self.api_key,
                 "Content-Type": "application/json",
                 "Accept": "audio/wav"
             }
@@ -264,6 +266,10 @@ class AzureTTSClient:
                     status_code=500, 
                     detail=f"TTS API 호출 실패 (상태코드: {response.status_code}): {error_detail}"
                 )
+            
+            # 응답 내용 검증
+            if len(response.content) == 0:
+                raise HTTPException(status_code=500, detail="TTS API가 빈 응답을 반환했습니다.")
             
             # 오디오 데이터를 Base64로 인코딩하여 데이터 URI 생성
             audio_bytes = response.content
