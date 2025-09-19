@@ -39,7 +39,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
   
   const router = useRouter();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
 
   useEffect(() => {
@@ -80,11 +80,21 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
   };
 
   const handleReasonSubmit = async (userReason: string) => {
-     if (!user) {
+     if (authLoading) {
+        toast({
+            variant: "destructive",
+            title: "잠시만 기다려주세요",
+            description: "사용자 정보를 동기화하는 중입니다. 잠시 후 다시 시도해주세요.",
+            duration: 3000,
+        });
+        return;
+    }
+     if (!user || !user.uid) {
         toast({
             variant: "destructive",
             title: "로그인 필요",
-            description: "약점 분석 기능을 사용하려면 로그인이 필요합니다.",
+            description: "약점 분석 기능을 사용하려면 로그인이 필요합니다. 먼저 로그인해주세요.",
+            duration: 5000,
         });
         router.push('/login');
         return;
@@ -102,28 +112,26 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
     setChatHistory(prev => [...prev, {role: 'user', content: `제가 이 답을 고른 이유는... ${userReason}`}]);
 
     try {
-        const questionContext = `문제: ${currentQuestion.questionText}\n본문: ${currentQuestion.passage}\n선택지: ${currentQuestion.options.map(o => `${o.id}: ${o.text}`).join('\n')}\n정답: ${currentQuestion.correctOptionId}`;
         const result = await processUserMistake({
-            userId: user.uid, // This needs to be the UserId from your Users table
-            questionId: currentQuestion.id,
-            questionContext: questionContext,
+            userId: user.uid,
+            question: currentQuestion, // Pass the entire question object
             selectedOptionId: selectedOption.id,
-            selectedOptionText: selectedOption.text,
-            userReason: userReason,
+            userReason: userReason
         });
 
-        if (!result.success || !result.analysis || !result.newQuestion) {
-            throw new Error(result.error || '분석 및 문제 생성에 실패했습니다.');
+        if (!result.success || !result.analysis || !result.generatedQuestion) {
+            throw new Error(result.error || 'AI 약점 분석 및 문제 생성에 실패했습니다.');
         }
 
-        const newAnalysis = `${result.analysis}\n\n이 약점을 넘어서기 위한 새로운 물길을 만들었어요. 아래 버튼을 눌러 새로운 문제에 도전해보세요! 물론, 이 문제에 대해 더 궁금한 점이 있다면 계속 질문하셔도 좋습니다.`;
-        setAnalysis(result.analysis); // Store original analysis for tutor chat
-        setChatHistory(prev => [...prev, {role: 'model', content: newAnalysis}]);
-        setGeneratedQuestionId(result.newQuestion.id);
+        const analysisMessage = `**AI 약점 분석:**\n${result.analysis}`;
+        const nextStepMessage = `\n\n이 분석을 바탕으로, 당신의 약점을 보완하기 위한 새로운 AI 생성 문제를 준비했습니다. 아래 버튼을 눌러 바로 도전해보세요!`;
+
+        setChatHistory(prev => [...prev, {role: 'model', content: analysisMessage + nextStepMessage}]);
+        setGeneratedQuestionId(result.generatedQuestion.id);
         
         toast({
-            title: "✅ 맞춤 문제 도착!",
-            description: "AI 메기 멘토가 새로운 성장의 기회를 만들었습니다.",
+            title: "✅ AI 약점 분석 완료!",
+            description: "AI 메기 멘토가 당신의 약점을 보완할 새로운 문제를 만들었습니다.",
         });
 
         setMentorInteraction('generationComplete');
@@ -174,7 +182,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
     try {
         const questionContext = `
         - 문제: ${currentQuestion.questionText}
-        - 본문: ${currentQuestion.passage}
+        - 본문: ${currentQuestion.passage || ''}
         - 선택지: ${currentQuestion.options.map(o => `${o.id}: ${o.text}`).join(', ')}
         - 정답: ${currentQuestion.correctOptionId}
         - 해설: ${currentQuestion.explanation}

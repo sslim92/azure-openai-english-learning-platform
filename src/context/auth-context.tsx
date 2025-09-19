@@ -1,83 +1,102 @@
 
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { 
+    getAuth, 
+    onAuthStateChanged, 
+    signOut,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    type User 
+} from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import { syncUser } from '@/lib/actions';
 import { useRouter } from 'next/navigation';
-
-// This is a mock user type. Replace with your actual user type from the database.
-interface User {
-  uid: string;
-  email: string | null;
-}
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, pass: string) => Promise<any>;
-  signup: (email: string, pass: string) => Promise<any>;
-  logout: () => Promise<any>;
+  signup: (email: string, pass: string) => Promise<void>;
+  login: (email: string, pass:string) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-// This is a mock implementation. Replace with your actual auth logic (e.g., calling your own API endpoints)
-// In a real app, you would not have dummy user data like this.
-const FAKE_USER: User = { uid: 'user-123-abc', email: 'test@example.com' };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
-
+  
   useEffect(() => {
-    // In a real app, you'd check for a session token (e.g., in localStorage or a cookie)
-    // and validate it with your backend to see if the user is already logged in.
-    const sessionUser = localStorage.getItem('session_user');
-    if (sessionUser) {
-        setUser(JSON.parse(sessionUser));
-    }
-    setLoading(false);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setLoading(true); // Start loading when auth state changes
+      if (user) {
+        setUser(user);
+        // Sync user data to your backend DB and wait for it to complete
+        try {
+            await syncUser({
+                userId: user.uid,
+                email: user.email!,
+                displayName: user.displayName,
+            });
+        } catch (error) {
+            console.error("Failed to sync user:", error);
+            // Optionally handle user sync error (e.g., log out the user)
+        }
+      } else {
+        setUser(null);
+      }
+      setLoading(false); // Stop loading after all operations are done
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  const login = async (email: string, pass: string) => {
-    // MOCK LOGIN: In a real app, this would be an API call to your backend
-    // which would validate credentials against the 'Users' table in Azure SQL.
-    console.log(`Attempting login for ${email}`);
-    if (email === FAKE_USER.email) { // Simple mock validation
-        setUser(FAKE_USER);
-        localStorage.setItem('session_user', JSON.stringify(FAKE_USER));
-        return Promise.resolve();
+
+  const signup = async (email: string, pass: string) => {
+    // setLoading(true) is not needed here as onAuthStateChanged will handle it
+    try {
+        await createUserWithEmailAndPassword(auth, email, pass);
+        // The onAuthStateChanged listener will handle the rest.
+    } catch (error) {
+        console.error("Signup failed: ", error);
+        throw error; // Rethrow to be caught by the UI
     }
-    return Promise.reject(new Error('Invalid credentials'));
   };
 
-  const signup = async (email: string, pass:string) => {
-     // MOCK SIGNUP: In a real app, this would be an API call to your backend
-    // which would create a new user in the 'Users' table.
-    console.log(`Attempting signup for ${email}`);
-    const newUser = { uid: `new-${Date.now()}`, email };
-    setUser(newUser);
-    localStorage.setItem('session_user', JSON.stringify(newUser));
-    return Promise.resolve();
-  }
+  const login = async (email: string, pass: string) => {
+    // setLoading(true) is not needed here as onAuthStateChanged will handle it
+    try {
+        await signInWithEmailAndPassword(auth, email, pass);
+        // The onAuthStateChanged listener will handle the rest.
+    } catch (error) {
+        console.error("Login failed: ", error);
+        throw error; // Rethrow to be caught by the UI
+    }
+  };
+
 
   const logout = async () => {
-    // MOCK LOGOUT
-    setUser(null);
-    localStorage.removeItem('session_user');
-    router.push('/');
-    return Promise.resolve();
+    try {
+      await signOut(auth);
+      router.push('/landing');
+    } catch (error) {
+      console.error("Logout failed: ", error);
+    }
   };
-  
-  const value = {
+
+  const value: AuthContextType = {
     user,
     loading,
-    login,
     signup,
+    login,
     logout,
   };
-  
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+
+  // Do not render children until loading is false
+  return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
@@ -87,3 +106,5 @@ export function useAuth() {
   }
   return context;
 }
+
+    
