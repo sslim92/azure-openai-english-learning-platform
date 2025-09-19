@@ -89,78 +89,270 @@ export async function uploadScriptsAndMatchToQuestions(pdfDataUri: string, year:
     }
 }
 
-export async function getTutorResponse(questionContext: string, weaknessAnalysis: string | null, chatHistory: ChatMessage[]) {
+export async function generateCustomExplanation(input: {
+    questionText: string;
+    passage: string;
+    options: Array<{id: string, text: string}>;
+    correctOptionId: string;
+    selectedOptionId: string;
+    originalExplanation: string;
+}) {
+  try {
+    // analyzer 에이전트에게 순수 JSON 데이터만 전송
+    const questionData = {
+      questionText: input.questionText,
+      passage: input.passage,
+      options: input.options,
+      correctOptionId: input.correctOptionId,
+      selectedOptionId: input.selectedOptionId,
+      originalExplanation: input.originalExplanation
+    };
+
+    const resp = await fetch(`${AI_SERVER_BASE}/v1/agent-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent: 'analyzer',
+        messages: [{ 
+          role: 'user', 
+          content: JSON.stringify(questionData)
+        }],
+        temperature: 0.3,
+      }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      console.warn(`AI analysis failed (${resp.status}):`, text);
+      
+      // Fallback: 기본 메시지 반환
+      const correctOption = input.options.find(o => o.id === input.correctOptionId);
+      return { 
+        success: true, 
+        explanation: `정답은 '${correctOption?.text}'입니다.\n\n${input.originalExplanation}\n\n괜찮습니다. 메기와 함께 꾸준히 학습해 나가요!` 
+      };
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    
+    // AI 응답이 있으면 정답과 함께 표시
+    if (data?.message) {
+      const correctOption = input.options.find(o => o.id === input.correctOptionId);
+      return { 
+        success: true, 
+        explanation: `정답은 '${correctOption?.text}'입니다.\n\n${data.message}` 
+      };
+    } else {
+      // AI 응답이 없으면 Fallback
+      const correctOption = input.options.find(o => o.id === input.correctOptionId);
+      return { 
+        success: true, 
+        explanation: `정답은 '${correctOption?.text}'입니다.\n\n${input.originalExplanation}\n\n괜찮습니다. 메기와 함께 꾸준히 학습해 나가요!` 
+      };
+    }
+    
+  } catch (error) {
+    console.error('Custom explanation generation failed:', error);
+    
+    // Fallback: 기본 메시지 반환
+    const correctOption = input.options.find(o => o.id === input.correctOptionId);
+    return { 
+      success: true, 
+      explanation: `정답은 '${correctOption?.text}'입니다.\n\n${input.originalExplanation}\n\n괜찮습니다. 메기와 함께 꾸준히 학습해 나가요!` 
+    };
+  }
+}
+
+// 새로운 함수: 사용자 답변 저장 + AI 분석 (유사 문제 생성 제거)
+export async function saveUserAnswer(input: {
+    userId: string;
+    questionId: string;
+    questionContext: string;
+    selectedOptionId: string;
+    selectedOptionText: string;
+    userReason: string;
+    isCorrect: boolean;
+}) {
     try {
-        const payload = {
-            messages: chatHistory,
-            context: {
-                questionContext: questionContext,
-                weaknessAnalysis: weaknessAnalysis,
+        // 오답일 때만 DB에 저장
+        if (!input.isCorrect) {
+            const mistakeRecord: UserMistake = {
+                userId: input.userId,
+                questionId: input.questionId,
+                selectedOptionKey: input.selectedOptionId,
+                reason: input.userReason,
+            };
+            await addUserMistake(mistakeRecord);
+            await safeRevalidatePath('/progress');
+        }
+
+        // 오답일 때만 AI 분석 수행
+        if (!input.isCorrect) {
+            const analysisPrompt = `
+문제 분석 요청:
+
+문제 정보:
+${input.questionContext}
+
+학생이 선택한 답: ${input.selectedOptionText}
+학생의 선택 이유: ${input.userReason}
+
+위 정보를 바탕으로 학생의 오답 원인을 분석하고, 어떤 영어 개념에서 약점이 있는지 파악해주세요.
+            `.trim();
+
+            const analysisResp = await fetch(`${AI_SERVER_BASE}/v1/agent-chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent: 'analyzer',
+                    messages: [{ role: 'user', content: analysisPrompt }],
+                    context: {
+                        questionContext: input.questionContext,
+                    },
+                    temperature: 0.2,
+                }),
+            });
+
+            if (!analysisResp.ok) {
+                const text = await analysisResp.text().catch(() => '');
+                throw new Error(`AI server error: ${analysisResp.status} ${text}`);
             }
+
+            const analysisResult = await analysisResp.json().catch(() => ({}));
+            const analysis = analysisResult?.message || "분석을 완료했습니다.";
+
+            return {
+                success: true,
+                analysis: analysis,
+                isCorrect: false
+            };
+        }
+
+        // 정답일 때
+        return {
+            success: true,
+            analysis: "정답입니다! 잘하셨어요.",
+            isCorrect: true
         };
-        const result = await postToAiServer('/agent-chat', payload);
-        return { success: true, response: result.message };
+
     } catch (error) {
-        console.error("Error getting tutor response from AI server:", error);
-        const errorMessage = error instanceof Error ? error.message : "AI 튜터 응답을 가져오는 중 알 수 없는 오류가 발생했습니다.";
-        return { success: false, error: errorMessage };
+        console.error('Save user answer failed:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'An unknown error occurred during answer processing.'
+        };
     }
 }
 
+// 기존 함수 유지 (하위 호환성을 위해)
+export async function processUserMistake(input: {
+    userId: string;
+    questionId: string;
+    questionContext: string;
+    selectedOptionId: string;
+    selectedOptionText: string;
+    userReason: string;
+}) {
+    try {
+        // 새로운 함수 호출
+        const saveResult = await saveUserAnswer({
+            ...input,
+            isCorrect: false // 이 함수는 오답 처리용이므로 항상 false
+        });
+
+        if (!saveResult.success) {
+            throw new Error(saveResult.error || 'Answer save failed');
+        }
+
+        // 유사 문제 생성은 별도로 유지
+        const originalQuestion = await getQuestionById(input.questionId);
+        if (!originalQuestion) {
+            throw new Error('Original question not found');
+        }
+
+        const generationResult = await createSimilarQuestion(originalQuestion);
+        if (!generationResult.success || !generationResult.newQuestion) {
+            throw new Error(generationResult.error || '새로운 문제 생성에 실패했습니다.');
+        }
+
+        return {
+            success: true,
+            analysis: saveResult.analysis,
+            newQuestion: generationResult.newQuestion
+        };
 
 export async function textToSpeech(text: string): Promise<{ success: boolean; audioDataUri?: string; error?: string }> {
     try {
         const result = await postToAiServer('/generate-audio', { text });
         return { success: true, audioDataUri: result.audioDataUri };
     } catch (error) {
-        console.error("Error generating audio from AI server:", error);
-        const errorMessage = error instanceof Error ? error.message : "음성 생성 중 알 수 없는 오류가 발생했습니다.";
-        return { success: false, error: errorMessage };
+        console.error('Process user mistake failed:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : "음성 생성 중 알 수 없는 오류가 발생했습니다."
+        };
     }
 }
 
 export async function createSimilarQuestion(originalQuestion: Question) {
     try {
-        const prompt = `
-You are an expert English question creator for the Korean CSAT (Suneung).
-A student has answered a question correctly and wants to try a similar one.
-Your task is to create a new, original multiple-choice question that is similar to the provided example question but completely distinct.
+        const aiInputObj = {
+            topic: originalQuestion.topic,
+            difficulty: originalQuestion.difficulty,
+            questionText: originalQuestion.questionText,
+            correctOptionId: originalQuestion.correctOptionId,
+            explanation: originalQuestion.explanation,
+        };
 
-The new question must be in JSON format and include:
-- id: A unique ID starting with 'ai-generated-' and a timestamp.
-- subject: Must be 'English'.
-- topic: Same as the original question's topic: '${originalQuestion.topic}'.
-- questionText: The main question text in KOREAN, and the passage in ENGLISH.
-- options: An array of 4-5 option objects, each with 'id' and 'text' in ENGLISH.
-- correctOptionId: The ID of the correct option.
-- explanation: A detailed explanation in KOREAN.
-- difficulty: Similar to the original: '${originalQuestion.difficulty}'.
-- generationReason: A concise, one-sentence explanation in KOREAN.
-
-Original Question Context (for reference only, do not copy):
----
-Topic: ${originalQuestion.topic}
-Difficulty: ${originalQuestion.difficulty}
-Question: ${originalQuestion.questionText}
----
-
-Generate a brand new, unique, and high-quality question.
-`;
+        const resp = await fetch(`${AI_SERVER_BASE}/v1/generate-similar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ input: { prompt: aiInputObj } }),
+        });
         
-        const result = await postToAiServer('/generate-similar', { input: { prompt } });
-
-        if (result && result.id) {
-             const newQuestion = { ...result, passage: result.passage || '' };
-             const { options, ...rest } = newQuestion;
-             const questionsToInsert = [{ ...rest, intent: newQuestion.topic }];
-             const optionsToInsert = newQuestion.options.map((o: any) => ({ questionId: newQuestion.id, id: o.id, text: o.text }));
-             await addQuestions(questionsToInsert, optionsToInsert);
-             revalidatePath('/questions');
-             revalidatePath('/');
-             return { success: true, newQuestion };
-        } else {
-            throw new Error('AI 서버가 유효한 유사 문제를 생성하지 못했습니다.');
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => '');
+            throw new Error(`AI server error: ${resp.status} ${text}`);
         }
+        
+        const newQuestion = await resp.json().catch(() => ({} as any));
+        const q = newQuestion as Question;
+        
+        if (!q || !q.id) {
+            throw new Error('AI server did not return a valid question');
+        }
+        
+        // 데이터베이스에 저장
+        const questionRecord: Omit<Question, 'options'> = {
+            id: q.id,
+            year: q.year,
+            month: q.month,
+            intent: q.intent,
+            topic: q.topic,
+            questionText: q.questionText,
+            passage: q.passage,
+            correctOptionId: q.correctOptionId,
+            explanation: q.explanation,
+            difficulty: q.difficulty,
+            listeningScript: q.listeningScript,
+            generationReason: q.generationReason,
+        };
+        
+        const optionsRecords = (q.options ?? []).map(o => ({
+            questionId: q.id,
+            id: o.id,
+            text: o.text,
+        }));
+
+        await addQuestions([questionRecord], optionsRecords);
+        await safeRevalidatePath('/questions');
+        await safeRevalidatePath('/random-quiz');
+
+        return {
+            success: true,
+            newQuestion: q,
+        };
+        
     } catch (error) {
         console.error("Error creating similar question:", error);
         const errorMessage = error instanceof Error ? error.message : "유사 문제 생성 중 알 수 없는 오류가 발생했습니다.";
