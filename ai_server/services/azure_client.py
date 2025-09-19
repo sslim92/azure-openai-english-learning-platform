@@ -20,15 +20,15 @@ from ai_server.core.config import (
 )
 
 
-class AzureOpenAIClient:
-    """Azure OpenAI 채팅 완성 클라이언트"""
+class BaseAzureClient:
+    """Azure OpenAI 클라이언트 기본 클래스"""
     
-    def __init__(self):
-        """클라이언트 초기화"""
-        self.endpoint = AZURE_OPENAI_ENDPOINT.rstrip("/")
-        self.api_key = AZURE_OPENAI_API_KEY
-        self.deployment = AZURE_OPENAI_DEPLOYMENT
-        self.api_version = AZURE_OPENAI_API_VERSION
+    def __init__(self, endpoint: str, api_key: str, deployment: str, api_version: str):
+        """기본 클라이언트 초기화"""
+        self.endpoint = endpoint.rstrip("/")
+        self.api_key = api_key
+        self.deployment = deployment
+        self.api_version = api_version
     
     def _get_headers(self) -> Dict[str, str]:
         """API 호출용 헤더 생성"""
@@ -37,47 +37,9 @@ class AzureOpenAIClient:
             "Content-Type": "application/json"
         }
     
-    def _build_url(self) -> str:
+    def _build_chat_url(self) -> str:
         """채팅 완성 API URL 생성"""
         return f"{self.endpoint}/openai/deployments/{self.deployment}/chat/completions?api-version={self.api_version}"
-    
-    async def chat_completion(
-        self, 
-        messages: List[Dict[str, str]], 
-        max_tokens: int = 512,
-        temperature: float = 0.2
-    ) -> Tuple[str, Optional[Dict[str, Any]]]:
-        """
-        채팅 완성 API 호출
-        
-        Args:
-            messages: 대화 메시지 목록
-            max_tokens: 최대 토큰 수
-            temperature: 창의성 수준
-            
-        Returns:
-            (원본 응답 텍스트, 파싱된 JSON 객체)
-        """
-        try:
-            url = self._build_url()
-            payload = {
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature
-            }
-            
-            response = requests.post(
-                url, 
-                headers=self._get_headers(), 
-                json=payload, 
-                timeout=120
-            )
-            response.raise_for_status()
-            
-            return self._extract_content(response.json())
-            
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Azure OpenAI API 호출 실패: {str(e)}")
     
     def _extract_content(self, response_data: Dict[str, Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
         """
@@ -108,26 +70,68 @@ class AzureOpenAIClient:
             return "", None
 
 
-class AzureQuestionGenerationClient:
-    """Azure OpenAI 문제 생성 전용 클라이언트"""
+class AzureOpenAIClient(BaseAzureClient):
+    """Azure OpenAI 채팅 완성 클라이언트 (멀티턴 대화용)"""
     
     def __init__(self):
         """클라이언트 초기화"""
-        self.endpoint = AZURE_OPENAI_ENDPOINT.rstrip("/")
-        self.api_key = AZURE_OPENAI_API_KEY
-        self.deployment = AZURE_QUESTION_MODEL_DEPLOYMENT or AZURE_OPENAI_DEPLOYMENT  # 문제 생성 전용 배포 또는 기본값
-        self.api_version = AZURE_OPENAI_API_VERSION
+        super().__init__(
+            AZURE_OPENAI_ENDPOINT, 
+            AZURE_OPENAI_API_KEY, 
+            AZURE_OPENAI_DEPLOYMENT, 
+            AZURE_OPENAI_API_VERSION
+        )
     
-    def _get_headers(self) -> Dict[str, str]:
-        """API 호출용 헤더 생성"""
-        return {
-            "api-key": self.api_key,
-            "Content-Type": "application/json"
-        }
+    async def chat_completion(
+        self, 
+        messages: List[Dict[str, str]], 
+        max_tokens: int = 512,
+        temperature: float = 0.2
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """
+        채팅 완성 API 호출 (랭체인 기반 멀티턴 대화용)
+        
+        Args:
+            messages: 대화 메시지 목록
+            max_tokens: 최대 토큰 수
+            temperature: 창의성 수준
+            
+        Returns:
+            (원본 응답 텍스트, 파싱된 JSON 객체)
+        """
+        try:
+            url = self._build_chat_url()
+            payload = {
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature
+            }
+            
+            response = requests.post(
+                url, 
+                headers=self._get_headers(), 
+                json=payload, 
+                timeout=120
+            )
+            response.raise_for_status()
+            
+            return self._extract_content(response.json())
+            
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Azure OpenAI API 호출 실패: {str(e)}")
+
+
+class AzureQuestionGenerationClient(BaseAzureClient):
+    """Azure OpenAI 문제 생성 전용 클라이언트 (단일 요청용)"""
     
-    def _build_url(self) -> str:
-        """문제 생성용 채팅 완성 API URL 생성"""
-        return f"{self.endpoint}/openai/deployments/{self.deployment}/chat/completions?api-version={self.api_version}"
+    def __init__(self):
+        """클라이언트 초기화"""
+        super().__init__(
+            AZURE_OPENAI_ENDPOINT, 
+            AZURE_OPENAI_API_KEY, 
+            AZURE_QUESTION_MODEL_DEPLOYMENT or AZURE_OPENAI_DEPLOYMENT,  # 문제 생성 전용 배포 또는 기본값
+            AZURE_OPENAI_API_VERSION
+        )
     
     async def generate_question(
         self, 
@@ -137,7 +141,7 @@ class AzureQuestionGenerationClient:
         temperature: float = 0.3
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         """
-        문제 생성 API 호출 (단일 요청)
+        문제 생성 API 호출 (단일 1회성 응답)
         
         Args:
             system_prompt: 시스템 프롬프트 (문제 생성 지시사항)
@@ -149,7 +153,7 @@ class AzureQuestionGenerationClient:
             (원본 응답 텍스트, 파싱된 JSON 객체)
         """
         try:
-            url = self._build_url()
+            url = self._build_chat_url()
             
             # 단일 요청용 메시지 구성
             messages = [
@@ -175,34 +179,6 @@ class AzureQuestionGenerationClient:
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Azure OpenAI 문제 생성 API 호출 실패: {str(e)}")
-    
-    def _extract_content(self, response_data: Dict[str, Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
-        """
-        API 응답에서 콘텐츠 추출 및 JSON 파싱 시도
-        
-        Args:
-            response_data: API 응답 데이터
-            
-        Returns:
-            (원본 텍스트, 파싱된 JSON 또는 None)
-        """
-        try:
-            choices = response_data.get("choices", [])
-            if not choices:
-                return "", None
-            
-            message = choices[0].get("message", {})
-            content = message.get("content", "")
-            
-            # JSON 파싱 시도
-            try:
-                parsed_json = json.loads(content)
-                return content, parsed_json
-            except json.JSONDecodeError:
-                return content, None
-                
-        except Exception:
-            return "", None
 
 
 class AzureTTSClient:
