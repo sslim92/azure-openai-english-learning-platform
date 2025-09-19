@@ -1,140 +1,148 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/auth-context';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2 } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/hooks/use-toast';
+
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const { login, signup } = useAuth();
+  const { signup, login, loading, user } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
 
-  const handleAuthAction = async (action: 'login' | 'signup') => {
-    setLoading(true);
-    try {
-      if (action === 'login') {
-        await login(email, password);
-      } else {
-        await signup(email, password);
-      }
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      router.push('/questions');
+    }
+  }, [user, router]);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginEmail || !loginPassword) {
       toast({
-        title: action === 'login' ? '로그인 성공' : '회원가입 성공',
-        description: '메인 페이지로 이동합니다.',
+        variant: "destructive",
+        title: "입력 오류",
+        description: "이메일과 비밀번호를 모두 입력해주세요.",
       });
-      router.push('/');
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await login(loginEmail, loginPassword);
+      // Success is handled by the useEffect
+    } catch (error: any) {
       toast({
-        variant: 'destructive',
-        title: '인증 실패',
-        description: errorMessage,
+        variant: "destructive",
+        title: "로그인 실패",
+        description: error.message || "이메일 또는 비밀번호를 확인해주세요.",
       });
     } finally {
-      setLoading(false);
+        setIsSubmitting(false);
+    }
+  };
+  
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+     if (!signupEmail || !signupPassword) {
+      toast({
+        variant: "destructive",
+        title: "입력 오류",
+        description: "이메일과 비밀번호를 모두 입력해주세요.",
+      });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await signup(signupEmail, signupPassword);
+       toast({
+        title: "✅ 회원가입 성공!",
+        description: "로그인 탭으로 이동하여 로그인해주세요.",
+      });
+      // Switch to login tab after successful signup could be a good UX,
+      // for now, we'll let the user log in manually.
+    } catch (error: any) {
+       toast({
+        variant: "destructive",
+        title: "회원가입 실패",
+        description: error.message || "입력 정보를 확인해주세요.",
+      });
+    } finally {
+        setIsSubmitting(false);
     }
   };
 
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-background p-4">
-       <div className="absolute top-4 left-4">
+      <div className="absolute top-4 left-4">
         <Button asChild variant="ghost">
-          <Link href="/">
+          <Link href="/landing">
             &larr; 홈으로 돌아가기
           </Link>
         </Button>
       </div>
-      <Tabs defaultValue="login" className="w-full max-w-md">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="login">로그인</TabsTrigger>
-          <TabsTrigger value="signup">회원가입</TabsTrigger>
-        </TabsList>
-        <TabsContent value="login">
-          <Card>
-            <CardHeader>
-              <CardTitle>로그인</CardTitle>
-              <CardDescription>
-                계정 정보를 입력하여 학습을 계속하세요.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="login-email">이메일</Label>
-                <Input
-                  id="login-email"
-                  type="email"
-                  placeholder="m@example.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="login-password">비밀번호</Label>
-                <Input 
-                  id="login-password" 
-                  type="password" 
-                  required 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              <Button onClick={() => handleAuthAction('login')} className="w-full" disabled={loading}>
-                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                로그인
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="signup">
-          <Card>
-            <CardHeader>
-              <CardTitle>회원가입</CardTitle>
-              <CardDescription>
-                새 계정을 만들어 맞춤형 학습을 시작하세요.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="signup-email">이메일</Label>
-                <Input
-                  id="signup-email"
-                  type="email"
-                  placeholder="m@example.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="signup-password">비밀번호</Label>
-                <Input 
-                  id="signup-password" 
-                  type="password" 
-                  required 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              <Button onClick={() => handleAuthAction('signup')} className="w-full" disabled={loading}>
-                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                회원가입
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <CardTitle>EduSearch Pro</CardTitle>
+          <CardDescription>
+            계정에 로그인하거나 새로 만드세요.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Tabs defaultValue="login" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="login">로그인</TabsTrigger>
+              <TabsTrigger value="signup">회원가입</TabsTrigger>
+            </TabsList>
+            <TabsContent value="login">
+              <form onSubmit={handleLogin} className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="login-email">이메일</Label>
+                  <Input id="login-email" type="email" placeholder="user@example.com" required value={loginEmail} onChange={e => setLoginEmail(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="login-password">비밀번호</Label>
+                  <Input id="login-password" type="password" required value={loginPassword} onChange={e => setLoginPassword(e.target.value)} />
+                </div>
+                <Button type="submit" className="w-full" disabled={isSubmitting || loading}>
+                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "로그인"}
+                </Button>
+              </form>
+            </TabsContent>
+            <TabsContent value="signup">
+               <form onSubmit={handleSignup} className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="signup-email">이메일</Label>
+                  <Input id="signup-email" type="email" placeholder="user@example.com" required value={signupEmail} onChange={e => setSignupEmail(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="signup-password">비밀번호</Label>
+                  <Input id="signup-password" type="password" placeholder="6자 이상 입력" required value={signupPassword} onChange={e => setSignupPassword(e.target.value)} />
+                </div>
+                <Button type="submit" className="w-full" disabled={isSubmitting || loading}>
+                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "회원가입"}
+                </Button>
+              </form>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
     </div>
   );
 }
