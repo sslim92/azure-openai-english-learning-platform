@@ -1,9 +1,7 @@
-
 "use client"
 
 import Link from "next/link"
 import {
-  BookOpen,
   CircleUser,
   PanelLeft,
 } from "lucide-react"
@@ -20,16 +18,20 @@ import {
 import {
   Sheet,
   SheetContent,
+  SheetHeader,
+  SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { useSidebar, SidebarTrigger } from "../ui/sidebar"
 import { AppSidebar } from "./sidebar"
 import { useAuth } from "@/context/auth-context"
 import { Skeleton } from "../ui/skeleton"
+import { useRouter } from "next/navigation"
 
 export function Header() {
   const { setOpenMobile } = useSidebar();
   const { user, loading, logout } = useAuth();
+  const router = useRouter();
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
@@ -41,6 +43,9 @@ export function Header() {
           </Button>
         </SheetTrigger>
         <SheetContent side="left" className="sm:max-w-xs p-0">
+          <SheetHeader className="p-4 border-b">
+            <SheetTitle>EduSearch Pro</SheetTitle>
+          </SheetHeader>
           <AppSidebar isMobile={true} />
         </SheetContent>
       </Sheet>
@@ -49,13 +54,13 @@ export function Header() {
 
       <div className="relative ml-auto flex-1 md:grow-0">
          {loading ? (
-            <Skeleton className="h-8 w-20" />
+            <Skeleton className="h-10 w-24" />
           ) : user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
+                <Button variant="outline">
                   <CircleUser className="h-5 w-5 mr-2" />
-                  {user.email}
+                  <span className="truncate max-w-28">{user.displayName || user.email}</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -65,10 +70,8 @@ export function Header() {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Button asChild size="sm">
-                <Link href="/login">
-                  로그인
-                </Link>
+            <Button onClick={() => router.push('/login')}>
+                로그인
             </Button>
           )}
       </div>

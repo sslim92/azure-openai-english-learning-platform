@@ -1,4 +1,4 @@
-import { getQuestionById } from '@/lib/data';
+import { fetchQuestionById } from '@/lib/actions';
 import { notFound } from 'next/navigation';
 import QuestionClientPage from './client-page';
 import { Suspense } from 'react';
@@ -23,21 +23,17 @@ function QuestionLoadingSkeleton() {
 }
 
 
-export default function QuestionPage({ params }: { params: { id: string } }) {
+export default async function QuestionPage({ params }: { params: { id: string } }) {
   
-  const Page = async () => {
-    const question = await getQuestionById(params.id);
+  const question = await fetchQuestionById(params.id);
 
-    if (!question) {
-      notFound();
-    }
-
-    return <QuestionClientPage initialQuestion={question} />;
+  if (!question) {
+    notFound();
   }
 
   return (
     <Suspense fallback={<QuestionLoadingSkeleton />}>
-      <Page />
+      <QuestionClientPage initialQuestion={question} />
     </Suspense>
   );
   

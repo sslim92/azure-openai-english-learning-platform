@@ -10,6 +10,7 @@ import { Header } from '@/components/layout/header';
 import { AppProgressBar as ProgressBar } from 'next-nprogress-bar';
 import { AuthProvider } from '@/context/auth-context';
 
+
 function AppLayout({ children }: { children: React.ReactNode }) {
     return (
         <SidebarProvider>
@@ -40,24 +41,24 @@ export default function RootLayout({
   return (
     <html lang="ko" suppressHydrationWarning>
       <head>
-        <title>메기스터디</title>
-        <meta name="description" content="AI 메기 멘토와 함께하는 수능 영어 학습" />
+        <title>EduSearch Pro</title>
+        <meta name="description" content="AI 기반 맞춤형 문제 학습 플랫폼" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,700&display=swap" rel="stylesheet" />
         <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet" />
       </head>
       <body className="font-body antialiased">
-         <AuthProvider>
+        <AuthProvider>
             {useAppLayout ? (
-              <AppLayout>
+            <AppLayout>
                 {children}
-              </AppLayout>
+            </AppLayout>
             ) : (
-              <>
+            <>
                 {children}
                 <Toaster />
-              </>
+            </>
             )}
             <ProgressBar
                 height="4px"
