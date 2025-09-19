@@ -38,7 +38,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
   
   const router = useRouter();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
 
   useEffect(() => {
@@ -113,11 +113,21 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
   };
 
   const handleReasonSubmit = async (userReason: string) => {
-     if (!user) {
+     if (authLoading) {
+        toast({
+            variant: "destructive",
+            title: "잠시만 기다려주세요",
+            description: "사용자 정보를 동기화하는 중입니다. 잠시 후 다시 시도해주세요.",
+            duration: 3000,
+        });
+        return;
+    }
+     if (!user || !user.uid) {
         toast({
             variant: "destructive",
             title: "로그인 필요",
-            description: "약점 분석 기능을 사용하려면 로그인이 필요합니다.",
+            description: "약점 분석 기능을 사용하려면 로그인이 필요합니다. 먼저 로그인해주세요.",
+            duration: 5000,
         });
         router.push('/login');
         return;
@@ -135,6 +145,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
     setChatHistory(prev => [...prev, {role: 'user', content: `제가 이 답을 고른 이유는... ${userReason}`}]);
 
     try {
+
         const questionContext = `문제: ${currentQuestion.questionText}\n본문: ${currentQuestion.passage}\n선택지: ${currentQuestion.options.map(o => `${o.id}: ${o.text}`).join('\n')}\n정답: ${currentQuestion.correctOptionId}`;
         
         // 새로운 saveUserAnswer 함수 사용 (오답 저장 + AI 분석만)
@@ -158,6 +169,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
         // Store analysis for tutor's use
         setAnalysis(analysisResult.analysis);
         setChatHistory(prev => [...prev, {role: 'model', content: newAnalysis}]);
+
         
         // 유사 문제 생성은 별도 버튼으로 처리하도록 변경
         toast({
@@ -230,7 +242,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
         본문: ${currentQuestion.passage}
         선택지: ${currentQuestion.options.map(o => `${o.id}: ${o.text}`).join('\n')}
         정답: ${currentQuestion.correctOptionId}
-        - 해설: ${currentQuestion.explanation}
+        해설: ${currentQuestion.explanation}
         `;
         
         const result = await getTutorResponse(questionContext, analysis, newHistory);
