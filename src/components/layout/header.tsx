@@ -1,3 +1,4 @@
+
 "use client"
 
 import Link from "next/link"
@@ -27,6 +28,7 @@ import { AppSidebar } from "./sidebar"
 import { useAuth } from "@/context/auth-context"
 import { Skeleton } from "../ui/skeleton"
 import { useRouter } from "next/navigation"
+import Image from "next/image"
 
 export function Header() {
   const { setOpenMobile } = useSidebar();
@@ -58,8 +60,17 @@ export function Header() {
           ) : user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  <CircleUser className="h-5 w-5 mr-2" />
+                <Button variant="outline" className="gap-2">
+                   {user.stage ? (
+                      <Image 
+                          src={`/images/catfish/${user.stage}.png`} 
+                          alt={user.stage}
+                          width={24}
+                          height={24}
+                      />
+                   ) : (
+                      <CircleUser className="h-5 w-5" />
+                   )}
                   <span className="truncate max-w-28">{user.displayName || user.email}</span>
                 </Button>
               </DropdownMenuTrigger>

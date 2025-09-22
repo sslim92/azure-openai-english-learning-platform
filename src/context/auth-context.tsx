@@ -3,21 +3,24 @@
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { 
-    getAuth, 
-    onAuthStateChanged, 
-    signOut,
+    onAuthStateChanged,
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
-    type User 
+    signOut,
+    updateProfile,
+    type User as FirebaseUser 
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
-import { syncUser } from '@/lib/actions';
+import { syncUser, getUserProfile, getUserStats, upsertUser } from '@/lib/actions';
+import type { UserProfile, UserStats } from '@/lib/data';
 import { useRouter } from 'next/navigation';
 
+type AppUser = FirebaseUser & UserProfile & UserStats;
+
 interface AuthContextType {
-  user: User | null;
+  user: AppUser | null;
   loading: boolean;
-  signup: (email: string, pass: string) => Promise<void>;
+  signup: (email: string, pass: string, displayName: string) => Promise<void>;
   login: (email: string, pass:string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -25,55 +28,101 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setLoading(true); // Start loading when auth state changes
-      if (user) {
-        setUser(user);
-        // Sync user data to your backend DB and wait for it to complete
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setLoading(true);
+      if (firebaseUser) {
         try {
+            // This syncUser is for general login and state changes.
             await syncUser({
-                userId: user.uid,
-                email: user.email!,
-                displayName: user.displayName,
+                userId: firebaseUser.uid,
+                email: firebaseUser.email!,
+                displayName: firebaseUser.displayName, // Pass whatever is in firebase auth
             });
+            
+            const [userProfile, userStats] = await Promise.all([
+              getUserProfile(firebaseUser.uid),
+              getUserStats(firebaseUser.uid)
+            ]);
+            
+            if (userProfile) {
+                const appUser: AppUser = {
+                    ...firebaseUser,
+                    ...userProfile,
+                    ...userStats,
+                };
+                setUser(appUser);
+            } else {
+                 console.error("Failed to fetch user profile after sync.");
+                 const fallbackUser: AppUser = {
+                    ...firebaseUser,
+                    level: 1,
+                    experiencePoints: 0,
+                    stage: '알',
+                    totalQuestionsSolved: 0,
+                    correctAnswers: 0,
+                    accuracy: 0,
+                 };
+                 setUser(fallbackUser);
+            }
+
         } catch (error) {
-            console.error("Failed to sync user:", error);
-            // Optionally handle user sync error (e.g., log out the user)
+            console.error("Failed to sync or fetch user profile on auth state change:", error);
+            const errorFallbackUser: AppUser = {
+                ...firebaseUser,
+                level: 1,
+                experiencePoints: 0,
+                stage: '알',
+                totalQuestionsSolved: 0,
+                correctAnswers: 0,
+                accuracy: 0,
+            };
+            setUser(errorFallbackUser);
         }
       } else {
         setUser(null);
       }
-      setLoading(false); // Stop loading after all operations are done
+      setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
 
-  const signup = async (email: string, pass: string) => {
-    // setLoading(true) is not needed here as onAuthStateChanged will handle it
+  const signup = async (email: string, pass: string, displayName: string) => {
     try {
-        await createUserWithEmailAndPassword(auth, email, pass);
-        // The onAuthStateChanged listener will handle the rest.
+        const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+        const firebaseUser = userCredential.user;
+
+        // Immediately update Firebase Auth profile with the new display name
+        await updateProfile(firebaseUser, { displayName });
+        
+        // **Crucially, directly write to our DB here with the displayName from the form**
+        // This avoids any race conditions with onAuthStateChanged.
+        await upsertUser({
+            userId: firebaseUser.uid,
+            email: firebaseUser.email!,
+            displayName: displayName // Use the name from the form directly
+        });
+
     } catch (error) {
         console.error("Signup failed: ", error);
-        throw error; // Rethrow to be caught by the UI
+        throw error; // Re-throw to be caught by the UI
     }
   };
 
   const login = async (email: string, pass: string) => {
-    // setLoading(true) is not needed here as onAuthStateChanged will handle it
     try {
         await signInWithEmailAndPassword(auth, email, pass);
-        // The onAuthStateChanged listener will handle the rest.
+        // onAuthStateChanged will handle the rest
+        router.push('/');
     } catch (error) {
         console.error("Login failed: ", error);
-        throw error; // Rethrow to be caught by the UI
+        throw error;
     }
   };
 
@@ -95,8 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logout,
   };
 
-  // Do not render children until loading is false
-  return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
@@ -106,5 +154,3 @@ export function useAuth() {
   }
   return context;
 }
-
-    

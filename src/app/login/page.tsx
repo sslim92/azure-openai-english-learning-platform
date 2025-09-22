@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -23,12 +22,13 @@ export default function LoginPage() {
   const [loginPassword, setLoginPassword] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
+  const [signupDisplayName, setSignupDisplayName] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (user) {
-      router.push('/questions');
+      router.push('/');
     }
   }, [user, router]);
 
@@ -59,17 +59,17 @@ export default function LoginPage() {
   
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-     if (!signupEmail || !signupPassword) {
+     if (!signupEmail || !signupPassword || !signupDisplayName) {
       toast({
         variant: "destructive",
         title: "입력 오류",
-        description: "이메일과 비밀번호를 모두 입력해주세요.",
+        description: "닉네임, 이메일, 비밀번호를 모두 입력해주세요.",
       });
       return;
     }
     setIsSubmitting(true);
     try {
-      await signup(signupEmail, signupPassword);
+      await signup(signupEmail, signupPassword, signupDisplayName);
        toast({
         title: "✅ 회원가입 성공!",
         description: "로그인 탭으로 이동하여 로그인해주세요.",
@@ -127,6 +127,10 @@ export default function LoginPage() {
             </TabsContent>
             <TabsContent value="signup">
                <form onSubmit={handleSignup} className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="signup-display-name">닉네임</Label>
+                  <Input id="signup-display-name" type="text" placeholder="메기" required value={signupDisplayName} onChange={e => setSignupDisplayName(e.target.value)} />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="signup-email">이메일</Label>
                   <Input id="signup-email" type="email" placeholder="user@example.com" required value={signupEmail} onChange={e => setSignupEmail(e.target.value)} />

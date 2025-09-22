@@ -10,7 +10,14 @@ import {
     getAvailableMonths, 
     getQuestionById as getQuestionByIdFromDb, 
     updateListeningScript, 
-    upsertUser 
+    upsertUser as upsertUserToDb,
+    type UserProfile,
+    getUserProfile as getUserProfileFromDb,
+    updateUserCatfishExperience,
+    addUserAnswer,
+    getUserStats as getUserStatsFromDb,
+    type UserStats,
+    getUserById
 } from '@/lib/data';
 import { revalidatePath } from 'next/cache';
 import type { ChatMessage } from '@/components/ai-mentor';
@@ -49,7 +56,7 @@ export async function uploadPdfAndExtractQuestions(pdfDataUri: string) {
         if (result && Array.isArray(result.questions)) {
             const questionsToInsert = result.questions.map((q: any) => {
                 const { options, ...rest } = q;
-                return { ...rest, intent: q.topic };
+                return { ...rest, intent: q.topic, passage: q.passage || '' };
             });
             const allOptions = result.questions.flatMap((q: any) => 
                 q.options.map((o: any) => ({ questionId: q.id, id: o.id, text: o.text }))
@@ -90,264 +97,159 @@ export async function uploadScriptsAndMatchToQuestions(pdfDataUri: string, year:
     }
 }
 
-export async function generateCustomExplanation(input: {
-    questionText: string;
-    passage: string;
-    options: Array<{id: string, text: string}>;
-    correctOptionId: string;
-    selectedOptionId: string;
-    originalExplanation: string;
-}) {
+export async function getTutorResponse(questionContext: string, analysis: string | null, chatHistory: ChatMessage[]) {
+    try {
+        const payload = {
+            agent: 'tutor',
+            messages: chatHistory,
+            context: {
+                questionContext: questionContext,
+                weaknessAnalysis: analysis,
+            }
+        };
+        const result = await postToAiServer('/agent-chat', payload);
+        return { success: true, response: result.message };
+    } catch (error) {
+        console.error("Error getting tutor response from AI server:", error);
+        const errorMessage = error instanceof Error ? error.message : "AI 튜터 응답을 가져오는 중 알 수 없는 오류가 발생했습니다.";
+        return { success: false, error: errorMessage };
+    }
+}
+
+export async function processUserSubmission(input: {
+  userId: string;
+  questionId: string;
+  selectedOptionId: string;
+  isCorrect: boolean;
+}): Promise<{ success: boolean; error?: string; }> {
+  if (!input.userId || !input.questionId || !input.selectedOptionId) {
+    return { success: false, error: '사용자, 질문, 또는 선택한 답변 정보가 누락되었습니다.' };
+  }
+  
   try {
-    // analyzer 에이전트에게 순수 JSON 데이터만 전송
-    const questionData = {
-      questionText: input.questionText,
-      passage: input.passage,
-      options: input.options,
-      correctOptionId: input.correctOptionId,
-      selectedOptionId: input.selectedOptionId,
-      originalExplanation: input.originalExplanation
-    };
+    const dbOperations: Promise<any>[] = [
+      addUserAnswer({
+        userId: input.userId,
+        questionId: input.questionId,
+        selectedOptionId: input.selectedOptionId,
+        isCorrect: input.isCorrect,
+      })
+    ];
 
-    const resp = await fetch(`${AI_SERVER_BASE_URL}/agent-chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        agent: 'analyzer',
-        messages: [{ 
-          role: 'user', 
-          content: JSON.stringify(questionData)
-        }],
-        temperature: 0.3,
-      }),
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      console.warn(`AI analysis failed (${resp.status}):`, text);
-      
-      // Fallback: 기본 메시지 반환
-      const correctOption = input.options.find(o => o.id === input.correctOptionId);
-      return { 
-        success: true, 
-        explanation: `정답은 '${correctOption?.text}'입니다.\n\n${input.originalExplanation}\n\n괜찮습니다. 메기와 함께 꾸준히 학습해 나가요!` 
-      };
+    if (input.isCorrect) {
+      const XP_PER_CORRECT_ANSWER = 10;
+      dbOperations.push(updateUserCatfishExperience(input.userId, XP_PER_CORRECT_ANSWER));
     }
 
-    const data = await resp.json().catch(() => ({}));
+    await Promise.all(dbOperations);
     
-    // AI 응답이 있으면 정답과 함께 표시
-    if (data?.message) {
-      const correctOption = input.options.find(o => o.id === input.correctOptionId);
-      return { 
-        success: true, 
-        explanation: `정답은 '${correctOption?.text}'입니다.\n\n${data.message}` 
-      };
-    } else {
-      // AI 응답이 없으면 Fallback
-      const correctOption = input.options.find(o => o.id === input.correctOptionId);
-      return { 
-        success: true, 
-        explanation: `정답은 '${correctOption?.text}'입니다.\n\n${input.originalExplanation}\n\n괜찮습니다. 메기와 함께 꾸준히 학습해 나가요!` 
-      };
-    }
-    
+    revalidatePath('/progress');
+    revalidatePath('/'); // For dashboard updates
+    revalidatePath('/layout'); // For sidebar updates
+
+    return { success: true };
+
   } catch (error) {
-    console.error('Custom explanation generation failed:', error);
-    
-    // Fallback: 기본 메시지 반환
-    const correctOption = input.options.find(o => o.id === input.correctOptionId);
-    return { 
-      success: true, 
-      explanation: `정답은 '${correctOption?.text}'입니다.\n\n${input.originalExplanation}\n\n괜찮습니다. 메기와 함께 꾸준히 학습해 나가요!` 
-    };
+    console.error("Error processing user submission in actions.ts:", error);
+    const errorMessage =
+      error instanceof Error ? error.message : "답안 제출 처리 중 알 수 없는 오류가 발생했습니다.";
+    return { success: false, error: errorMessage };
   }
 }
 
-export async function getTutorResponse(
-    questionContext: string, 
-    analysis: string, 
-    chatHistory: Array<{role: string, content: string}>
-): Promise<{ success: boolean; response?: string; error?: string }> {
-    try {
-        // JSON 데이터 구성 - 서버에서 프롬프트 작성하도록 데이터만 전송
-        const tutorData = {
-            questionContext: questionContext,
-            analysis: analysis,
-            chatHistory: chatHistory
-        };
-
-        const resp = await fetch(`${AI_SERVER_BASE_URL}/agent-chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                agent: 'tutor',
-                messages: [{ 
-                    role: 'user', 
-                    content: JSON.stringify(tutorData)
-                }],
-                temperature: 0.7,
-            }),
-        });
-
-        if (!resp.ok) {
-            const text = await resp.text().catch(() => '');
-            console.warn(`AI tutor response failed (${resp.status}):`, text);
-            
-            // Fallback: 기본 응답 반환
-            return { 
-                success: true, 
-                response: "안녕하세요! 메기입니다. 질문이 있으시면 언제든 말씀해주세요. 함께 영어 실력을 키워나가요!" 
-            };
-        }
-
-        const data = await resp.json().catch(() => ({}));
-        
-        if (data?.message) {
-            return { 
-                success: true, 
-                response: data.message 
-            };
-        } else {
-            // AI 응답이 없으면 Fallback
-            return { 
-                success: true, 
-                response: "안녕하세요! 메기입니다. 질문이 있으시면 언제든 말씀해주세요. 함께 영어 실력을 키워나가요!" 
-            };
-        }
-        
-    } catch (error) {
-        console.error('Tutor response generation failed:', error);
-        
-        // Fallback: 기본 응답 반환
-        return { 
-            success: true, 
-            response: "안녕하세요! 메기입니다. 질문이 있으시면 언제든 말씀해주세요. 함께 영어 실력을 키워나가요!" 
-        };
-    }
-}
-
-// 새로운 함수: 사용자 답변 저장 + AI 분석 (유사 문제 생성 제거)
-export async function saveUserAnswer(input: {
-    userId: string;
-    questionId: string;
-    questionContext: string;
-    selectedOptionId: string;
-    selectedOptionText: string;
-    userReason: string;
-    isCorrect: boolean;
-}) {
-    try {
-        // 오답일 때만 DB에 저장
-        if (!input.isCorrect) {
-            const mistakeRecord: UserMistake = {
-                userId: input.userId,
-                questionId: input.questionId,
-                selectedOptionKey: input.selectedOptionId,
-                reason: input.userReason,
-            };
-            await addUserMistake(mistakeRecord);
-            await revalidatePath('/progress');
-        }
-
-        // 오답일 때만 AI 분석 수행
-        if (!input.isCorrect) {
-            // JSON 데이터 구성 - 서버에서 프롬프트 작성하도록 데이터만 전송
-            const analysisData = {
-                questionContext: input.questionContext,
-                selectedOptionText: input.selectedOptionText,
-                userReason: input.userReason,
-                analysisType: "mistake_analysis"
-            };
-
-            const analysisResp = await fetch(`${AI_SERVER_BASE_URL}/agent-chat`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    agent: 'analyzer',
-                    messages: [{ 
-                        role: 'user', 
-                        content: JSON.stringify(analysisData)
-                    }],
-                    temperature: 0.2,
-                }),
-            });
-
-            if (!analysisResp.ok) {
-                const text = await analysisResp.text().catch(() => '');
-                throw new Error(`AI server error: ${analysisResp.status} ${text}`);
-            }
-
-            const analysisResult = await analysisResp.json().catch(() => ({}));
-            const analysis = analysisResult?.message || "분석을 완료했습니다.";
-
-            return {
-                success: true,
-                analysis: analysis,
-                isCorrect: false
-            };
-        }
-
-        // 정답일 때
-        return {
-            success: true,
-            analysis: "정답입니다! 잘하셨어요.",
-            isCorrect: true
-        };
-
-    } catch (error) {
-        console.error('Save user answer failed:', error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : 'An unknown error occurred during answer processing.'
-        };
-    }
-}
-
-// 기존 함수 유지 (하위 호환성을 위해)
 export async function processUserMistake(input: {
-    userId: string;
-    questionId: string;
-    questionContext: string;
-    selectedOptionId: string;
-    selectedOptionText: string;
-    userReason: string;
-}) {
-    try {
-        // 새로운 함수 호출
-        const saveResult = await saveUserAnswer({
-            ...input,
-            isCorrect: false // 이 함수는 오답 처리용이므로 항상 false
-        });
+  userId: string;
+  question: Question;
+  selectedOptionId: string;
+  userReason: string;
+}): Promise<{
+  success: boolean;
+  analysis?: string;
+  generatedQuestion?: Question;
+  error?: string;
+}> {
+  if (!input.userId || typeof input.userId !== 'string' || input.userId.trim() === '') {
+    return { success: false, error: '잘못되었거나 존재하지 않는 사용자 ID입니다. 로그인 해주세요.' };
+  }
+  if (!input.question) {
+    return { success: false, error: '질문 정보가 누락되었습니다.' };
+  }
 
-        if (!saveResult.success) {
-            throw new Error(saveResult.error || 'Answer save failed');
-        }
+  try {
+    const questionContext = `
+      문제: ${input.question.questionText}
+      본문: ${input.question.passage || ''}
+      선택지: ${JSON.stringify(input.question.options)}
+      정답: ${input.question.correctOptionId}
+      해설: ${input.question.explanation}
+    `;
+    const selectedOption = input.question.options.find(o => o.id === input.selectedOptionId);
 
-        // 유사 문제 생성은 별도로 유지
-        const originalQuestion = await fetchQuestionById(input.questionId);
-        if (!originalQuestion) {
-            throw new Error('Original question not found');
-        }
+    const payload = {
+      agent: 'analyzer',
+      input: JSON.stringify({
+        analysisType: 'mistake_analysis',
+        questionContext: questionContext,
+        selectedOptionText: selectedOption?.text || 'N/A',
+        userReason: input.userReason
+      }),
+      messages: [],
+    };
 
-        const generationResult = await createSimilarQuestion(originalQuestion);
-        if (!generationResult.success || !generationResult.newQuestion) {
-            throw new Error(generationResult.error || '새로운 문제 생성에 실패했습니다.');
-        }
+    const analysisResult = await postToAiServer('/agent-chat', payload);
 
-        return {
-            success: true,
-            analysis: saveResult.analysis,
-            newQuestion: generationResult.newQuestion
-        };
-    } catch (error) {
-        console.error('Process user mistake failed:', error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : 'An unknown error occurred during mistake processing.'
-        };
+    if (!analysisResult || !analysisResult.message) {
+      throw new Error('AI 서버가 분석 응답을 생성하지 못했습니다.');
     }
+    
+    // Now generate a question based on the analysis
+    const generationPayload = {
+      input: {
+          topic: input.question.topic,
+          difficulty: input.question.difficulty,
+          questionText: input.question.questionText,
+          correctOptionId: input.question.correctOptionId,
+          explanation: `학생의 약점 분석: ${analysisResult.message}\n\n기존 해설: ${input.question.explanation}`
+      }
+    };
+    const generatedQuestionResult = await postToAiServer('/generate-similar', generationPayload);
+
+    if (!generatedQuestionResult || !generatedQuestionResult.id) {
+       throw new Error('AI 서버가 약점 기반 문제를 생성하지 못했습니다.');
+    }
+
+    const newQuestion = { ...generatedQuestionResult, passage: generatedQuestionResult.passage || '' };
+    newQuestion.generationReason = `이전 문제에서 발견된 약점(${analysisResult.message.substring(0, 50)}...)을 보완하기 위해 생성된 문제입니다.`;
+
+    await addUserMistake({
+      userId: input.userId,
+      questionId: input.question.id,
+      selectedOptionKey: input.selectedOptionId,
+      reason: input.userReason,
+    });
+    revalidatePath('/progress');
+    
+    const { options, ...rest } = newQuestion;
+    const questionToInsert = { ...rest, intent: newQuestion.topic, passage: newQuestion.passage || '' };
+    const optionsToInsert = newQuestion.options.map((o: any) => ({ questionId: newQuestion.id, id: o.id, text: o.text }));
+    await addQuestions([questionToInsert], optionsToInsert);
+    revalidatePath('/questions');
+    revalidatePath('/');
+
+    return { 
+        success: true, 
+        analysis: analysisResult.message,
+        generatedQuestion: newQuestion
+    };
+
+  } catch (error) {
+    console.error("Error processing user mistake:", error);
+    const errorMessage =
+      error instanceof Error ? error.message : "오답 처리 중 알 수 없는 오류가 발생했습니다.";
+    return { success: false, error: errorMessage };
+  }
 }
+
 
 export async function textToSpeech(text: string): Promise<{ success: boolean; audioDataUri?: string; error?: string }> {
     try {
@@ -372,11 +274,7 @@ export async function createSimilarQuestion(originalQuestion: Question) {
             explanation: originalQuestion.explanation,
         };
 
-        const resp = await fetch(`${AI_SERVER_BASE_URL}/generate-similar`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ input: { prompt: aiInputObj } }),
-        });
+        const resp = await postToAiServer('/generate-similar', { input: { prompt: aiInputObj } });
         
         if (!resp.ok) {
             const text = await resp.text().catch(() => '');
@@ -390,21 +288,8 @@ export async function createSimilarQuestion(originalQuestion: Question) {
             throw new Error('AI server did not return a valid question');
         }
         
-        // 데이터베이스에 저장
-        const questionRecord: Omit<Question, 'options'> = {
-            id: q.id,
-            year: q.year,
-            month: q.month,
-            intent: q.intent,
-            topic: q.topic,
-            questionText: q.questionText,
-            passage: q.passage,
-            correctOptionId: q.correctOptionId,
-            explanation: q.explanation,
-            difficulty: q.difficulty,
-            listeningScript: q.listeningScript,
-            generationReason: q.generationReason,
-        };
+        const { options, ...rest } = q;
+        const questionRecord = { ...rest, intent: q.topic, passage: q.passage || '' };
         
         const optionsRecords = (q.options ?? []).map(o => ({
             questionId: q.id,
@@ -413,8 +298,8 @@ export async function createSimilarQuestion(originalQuestion: Question) {
         }));
 
         await addQuestions([questionRecord], optionsRecords);
-        await revalidatePath('/questions');
-        await revalidatePath('/random-quiz');
+        revalidatePath('/questions');
+        revalidatePath('/random-quiz');
 
         return {
             success: true,
@@ -440,8 +325,6 @@ export async function fetchQuestionById(id: string): Promise<Question | null> {
     if (question) {
         return question;
     }
-    // Fallback for AI-generated questions that might not be in DB immediately
-    // This part is less critical now as AI generation is coupled with DB insertion.
     return null;
 }
 
@@ -459,10 +342,10 @@ export async function getAvailableMonthsForYear(year: number) {
 
 export async function syncUser(user: {userId: string; email: string; displayName: string | null }): Promise<{ success: boolean; error?: string }> {
     try {
-        await upsertUser({
+        await upsertUserToDb({
             userId: user.userId,
             email: user.email,
-            displayName: user.displayName || user.email,
+            displayName: user.displayName, // Pass displayName as is, don't fallback to email part
         });
         return { success: true };
     } catch (error) {
@@ -470,4 +353,23 @@ export async function syncUser(user: {userId: string; email: string; displayName
         const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류로 사용자 정보 동기화에 실패했습니다.';
         return { success: false, error: errorMessage };
     }
+}
+
+export async function upsertUser(user: {userId: string; email: string; displayName: string | null }): Promise<{ success: boolean; error?: string }> {
+    try {
+        await upsertUserToDb(user);
+        return { success: true };
+    } catch (error) {
+        console.error('Upsert user failed:', error);
+        const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류로 사용자 정보 저장/업데이트에 실패했습니다.';
+        return { success: false, error: errorMessage };
+    }
+}
+
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+    return getUserProfileFromDb(userId);
+}
+
+export async function getUserStats(userId: string): Promise<UserStats> {
+    return getUserStatsFromDb(userId);
 }
