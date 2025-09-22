@@ -10,17 +10,17 @@ import Link from 'next/link';
 import { ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getTutorResponse, processUserMistake, createSimilarQuestion, textToSpeech, processUserSubmission } from '@/lib/actions';
+import { getTutorResponse, processUserMistake, createSimilarQuestion, textToSpeech, processUserSubmission, generateCustomExplanation } from '@/lib/actions';
 import type { ChatMessage } from '@/components/ai-mentor';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-context';
 
-interface QuestionClientPageProps {
-    initialQuestion: Question;
-}
-
 // Defines the possible interaction modes with the AI mentor
 export type MentorInteraction = 'idle' | 'analyzing' | 'tutoring' | 'generating' | 'generationComplete';
+
+interface QuestionClientPageProps {
+  initialQuestion: Question;
+}
 
 export default function QuestionClientPage({ initialQuestion }: QuestionClientPageProps) {
   const [currentQuestion, setCurrentQuestion] = useState<Question>(initialQuestion);
@@ -105,7 +105,24 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
     if (correct) {
       setChatHistory([{ role: 'model', content: '훌륭해요, 이번 물살은 잘 타셨네요! 개념을 확실히 다지기 위해 AI가 만든 유사 문제를 풀어보시겠어요? 또는 궁금한 점이 있다면 질문해주세요.' }]);
     } else {
-      setChatHistory([{ role: 'model', content: `아쉽지만 정답을 살짝 비껴갔네요. 정답은 ‘${currentQuestion.options.find(o => o.id === currentQuestion.correctOptionId)?.text}’입니다.\n\n해설: ${currentQuestion.explanation}\n\n괜찮습니다. 메기도 가끔 물길을 헤매다 길을 찾곤 하죠. 해설을 보고 궁금한 점을 질문하시거나, AI 약점 분석을 받아보세요.` }]);
+      // 오답 시 맞춤 해설 생성 요청
+      try {
+        const explanationResult = await generateCustomExplanation({
+          question: currentQuestion,
+          selectedOptionId: selectedOptionId
+        });
+        
+        if (explanationResult.success && explanationResult.explanation) {
+          setChatHistory([{ role: 'model', content: explanationResult.explanation }]);
+        } else {
+          // 실패 시 기본 메시지 사용
+          setChatHistory([{ role: 'model', content: `아쉽지만 정답을 살짝 비껴갔네요. 정답은 '${currentQuestion.options.find(o => o.id === currentQuestion.correctOptionId)?.text}'입니다.\n\n해설: ${currentQuestion.explanation}\n\n괜찮습니다. 메기도 가끔 물길을 헤매다 길을 찾곤 하죠. 해설을 보고 궁금한 점을 질문하시거나, AI 약점 분석을 받아보세요.` }]);
+        }
+      } catch (error) {
+        console.error('Custom explanation error:', error);
+        // 에러 시 기본 메시지 사용
+        setChatHistory([{ role: 'model', content: `아쉽지만 정답을 살짝 비껴갔네요. 정답은 '${currentQuestion.options.find(o => o.id === currentQuestion.correctOptionId)?.text}'입니다.\n\n해설: ${currentQuestion.explanation}\n\n괜찮습니다. 메기도 가끔 물길을 헤매다 길을 찾곤 하죠. 해설을 보고 궁금한 점을 질문하시거나, AI 약점 분석을 받아보세요.` }]);
+      }
     }
   };
 
@@ -270,7 +287,6 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
           question={currentQuestion}
           isSubmitted={isSubmitted}
           onAnswerSubmit={handleAnswerSubmit}
-          onAudioRequest={textToSpeech}
           key={currentQuestion.id}
         />
         <AiMentor

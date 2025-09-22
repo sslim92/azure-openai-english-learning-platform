@@ -14,7 +14,7 @@ import {
   SidebarMenuSkeleton,
   SidebarSeparator,
 } from "@/components/ui/sidebar";
-import { BookOpen, BarChart3, Shuffle, Home, LogIn, Upload, User } from "lucide-react";
+import { BookOpen, BarChart3, Shuffle, Home, LogIn, User } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "next/navigation";
 
@@ -23,7 +23,6 @@ const menuItems = [
   { href: "/questions", label: "문제 은행", icon: BookOpen, auth: false },
   { href: "/random-quiz", label: "랜덤 문제", icon: Shuffle, auth: false },
   { href: "/progress", label: "나의 학습 현황", icon: BarChart3, auth: true },
-  { href: "/admin/upload", label: "자료 업로드", icon: Upload, auth: true }, // Assuming this is an admin/auth only feature
 ];
 
 export function AppSidebar({ isMobile = false }) {

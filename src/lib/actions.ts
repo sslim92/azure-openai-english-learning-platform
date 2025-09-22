@@ -50,52 +50,7 @@ async function postToAiServer(endpoint: string, body: object) {
 }
 
 
-export async function uploadPdfAndExtractQuestions(pdfDataUri: string) {
-     try {
-        const result = await postToAiServer('/extract-questions', { input: { pdfDataUri } });
-        if (result && Array.isArray(result.questions)) {
-            const questionsToInsert = result.questions.map((q: any) => {
-                const { options, ...rest } = q;
-                return { ...rest, intent: q.topic, passage: q.passage || '' };
-            });
-            const allOptions = result.questions.flatMap((q: any) => 
-                q.options.map((o: any) => ({ questionId: q.id, id: o.id, text: o.text }))
-            );
-            
-            await addQuestions(questionsToInsert, allOptions);
-            revalidatePath('/questions');
-            revalidatePath('/');
-            return { success: true, questionCount: result.questions.length };
-        } else {
-             throw new Error('AI 서버가 유효한 질문 데이터를 반환하지 않았습니다.');
-        }
-    } catch (error) {
-        console.error("Error processing PDF:", error);
-        const errorMessage = error instanceof Error ? error.message : "PDF 처리 중 알 수 없는 오류가 발생했습니다.";
-        return { success: false, error: errorMessage };
-    }
-}
 
-
-export async function uploadScriptsAndMatchToQuestions(pdfDataUri: string, year: number, month: number) {
-     try {
-        const result = await postToAiServer('/match-scripts', { input: { pdfDataUri, year, month } });
-
-        if (result && Array.isArray(result.scripts)) {
-            for (const script of result.scripts) {
-                await updateListeningScript(script.questionId, script.script);
-            }
-            revalidatePath('/questions');
-            return { success: true, matchCount: result.scripts.length };
-        } else {
-            throw new Error('AI 서버가 유효한 스크립트 데이터를 반환하지 않았습니다.');
-        }
-    } catch (error) {
-        console.error("Error processing script PDF:", error);
-        const errorMessage = error instanceof Error ? error.message : "스크립트 처리 중 알 수 없는 오류가 발생했습니다.";
-        return { success: false, error: errorMessage };
-    }
-}
 
 export async function getTutorResponse(questionContext: string, analysis: string | null, chatHistory: ChatMessage[]) {
     try {
@@ -114,6 +69,43 @@ export async function getTutorResponse(questionContext: string, analysis: string
         const errorMessage = error instanceof Error ? error.message : "AI 튜터 응답을 가져오는 중 알 수 없는 오류가 발생했습니다.";
         return { success: false, error: errorMessage };
     }
+}
+
+export async function generateCustomExplanation(input: {
+  question: Question;
+  selectedOptionId: string;
+}): Promise<{ success: boolean; explanation?: string; error?: string; }> {
+  try {
+    const selectedOption = input.question.options.find(o => o.id === input.selectedOptionId);
+    
+    const payload = {
+      agent: 'analyzer',
+      messages: [],
+      context: {
+        analysisType: 'custom_explanation',
+        questionText: input.question.questionText,
+        passage: input.question.passage || '',
+        listeningScript: input.question.listeningScript || '',
+        options: input.question.options,
+        correctOptionId: input.question.correctOptionId,
+        selectedOptionId: input.selectedOptionId,
+        selectedOptionText: selectedOption?.text || '',
+        originalExplanation: input.question.explanation
+      }
+    };
+
+    const result = await postToAiServer('/agent-chat', payload);
+    
+    if (!result || !result.message) {
+      throw new Error('AI 서버가 맞춤 해설을 생성하지 못했습니다.');
+    }
+
+    return { success: true, explanation: result.message };
+  } catch (error) {
+    console.error("Error generating custom explanation:", error);
+    const errorMessage = error instanceof Error ? error.message : "맞춤 해설 생성 중 알 수 없는 오류가 발생했습니다.";
+    return { success: false, error: errorMessage };
+  }
 }
 
 export async function processUserSubmission(input: {
@@ -187,13 +179,13 @@ export async function processUserMistake(input: {
 
     const payload = {
       agent: 'analyzer',
-      input: JSON.stringify({
+      messages: [],
+      context: {
         analysisType: 'mistake_analysis',
         questionContext: questionContext,
         selectedOptionText: selectedOption?.text || 'N/A',
         userReason: input.userReason
-      }),
-      messages: [],
+      }
     };
 
     const analysisResult = await postToAiServer('/agent-chat', payload);

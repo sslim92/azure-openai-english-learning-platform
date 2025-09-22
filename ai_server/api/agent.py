@@ -50,6 +50,38 @@ async def agent_chat(request: AgentChatRequest):
             if weakness_analysis := request.context.get("weaknessAnalysis"):
                 context_parts.append(f"학습자 약점 분석:\n{weakness_analysis}")
             
+            # analyzer 에이전트를 위한 오답 분석 컨텍스트 추가
+            if analysis_type := request.context.get("analysisType"):
+                if analysis_type == "mistake_analysis":
+                    selected_text = request.context.get("selectedOptionText", "N/A")
+                    user_reason = request.context.get("userReason", "")
+                    context_parts.append(f"선택한 답: {selected_text}")
+                    context_parts.append(f"학생의 선택 이유: {user_reason}")
+                elif analysis_type == "custom_explanation":
+                    # 맞춤 해설 생성을 위한 컨텍스트 구성
+                    question_text = request.context.get("questionText", "")
+                    passage = request.context.get("passage", "")
+                    listening_script = request.context.get("listeningScript", "")
+                    options = request.context.get("options", [])
+                    correct_option_id = request.context.get("correctOptionId", "")
+                    selected_option_id = request.context.get("selectedOptionId", "")
+                    selected_option_text = request.context.get("selectedOptionText", "")
+                    original_explanation = request.context.get("originalExplanation", "")
+                    
+                    # 선택지 텍스트 구성
+                    options_text = "\n".join([f"{opt.get('id', '')}: {opt.get('text', '')}" for opt in options])
+                    
+                    context_parts.append(f"문제: {question_text}")
+                    if passage:
+                        context_parts.append(f"지문: {passage}")
+                    if listening_script:
+                        context_parts.append(f"듣기 대본: {listening_script}")
+                    context_parts.append(f"선택지:\n{options_text}")
+                    context_parts.append(f"정답: {correct_option_id}")
+                    context_parts.append(f"학생이 선택한 답: {selected_option_id} ({selected_option_text})")
+                    context_parts.append(f"기존 해설: {original_explanation}")
+                    context_parts.append("위 정보를 바탕으로 학생이 선택한 오답에 대한 맞춤형 해설을 생성해주세요.")
+            
             if context_parts:
                 system_prefix = "\n\n".join(context_parts)
         
