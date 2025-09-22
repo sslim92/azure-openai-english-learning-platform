@@ -1,3 +1,4 @@
+
 /**
  * @type {import('next').NextConfig}
  */
@@ -33,6 +34,16 @@ const nextConfig: NextConfig = {
         pathname: '/**',
       },
     ],
+  },
+   webpack: (config, { isServer }) => {
+    // Exclude 'tedious' from client-side bundles
+    if (!isServer) {
+      config.externals.push({
+        tedious: 'tedious'
+      });
+    }
+
+    return config;
   },
 };
 

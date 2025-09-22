@@ -1,4 +1,6 @@
 
+'use server';
+
 import sql from 'mssql';
 import { config as dotenvConfig } from 'dotenv';
 
@@ -15,7 +17,7 @@ const dbConfig = {
   },
 };
 
-let pool: sql.ConnectionPool;
+let pool: sql.ConnectionPool | undefined;
 
 async function getDbPool(): Promise<sql.ConnectionPool> {
   if (pool && pool.connected) {
@@ -32,9 +34,9 @@ async function getDbPool(): Promise<sql.ConnectionPool> {
     return pool;
   } catch (err) {
     console.error('Database Connection Failed! Check your environment variables: ', err);
-    pool = undefined as any; 
+    pool = undefined; 
     throw err;
   }
 }
 
-export { getDbPool, sql };
+export { getDbPool };

@@ -51,3 +51,6 @@ ai_server/**/*.pyc
 ai_server/**/*.pyo
 ai_server/**/*.pyd
 ai_server/**/.Python
+
+# root-level virtual environment
+/venv/
