@@ -127,3 +127,117 @@ async def list_agents():
         return {"agents": agents}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"에이전트 목록 조회 중 오류: {str(e)}")
+
+
+@router.post("/multi-turn-chat")
+async def multi_turn_chat(request: dict):
+    """
+    멀티턴 대화 지원 엔드포인트
+    
+    Args:
+        request: {
+            "agent_name": "tutor|analyzer",
+            "user_message": "사용자 메시지",
+            "conversation_history": [{"role": "user|assistant", "content": "..."}],
+            "system_context": "시스템 컨텍스트 (선택사항)",
+            "temperature": 0.2 (선택사항)
+        }
+    
+    Returns:
+        {
+            "agent_response": "에이전트 응답",
+            "updated_history": [...],
+            "conversation_id": "대화 ID (선택사항)"
+        }
+    """
+    try:
+        agent_name = request.get("agent_name", "tutor").lower()
+        user_message = request.get("user_message", "")
+        conversation_history = request.get("conversation_history", [])
+        system_context = request.get("system_context")
+        temperature = request.get("temperature")
+        
+        if not user_message:
+            raise HTTPException(status_code=400, detail="사용자 메시지가 필요합니다.")
+        
+        # 에이전트 조회
+        if not agent_manager.get_agent(agent_name):
+            raise HTTPException(status_code=404, detail=f"에이전트를 찾을 수 없습니다: {agent_name}")
+        
+        # 온도 설정
+        if temperature is not None:
+            agent = agent_manager.get_agent(agent_name)
+            agent.temperature = float(temperature)
+        
+        # 멀티턴 대화 진행
+        agent_response, updated_history = await agent_manager.continue_conversation(
+            agent_name=agent_name,
+            user_message=user_message,
+            conversation_history=conversation_history,
+            system_context=system_context
+        )
+        
+        return {
+            "agent_response": agent_response,
+            "updated_history": updated_history,
+            "agent_name": agent_name
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"멀티턴 대화 처리 중 오류: {str(e)}")
+
+
+@router.post("/switch-agent")
+async def switch_agent_conversation(request: dict):
+    """
+    에이전트 간 대화 전환 엔드포인트
+    
+    Args:
+        request: {
+            "from_agent": "현재 에이전트",
+            "to_agent": "전환할 에이전트",
+            "conversation_history": [...],
+            "transition_context": "전환 컨텍스트 (선택사항)"
+        }
+    
+    Returns:
+        {
+            "agent_response": "새 에이전트 응답",
+            "updated_history": [...],
+            "switched_to": "전환된 에이전트"
+        }
+    """
+    try:
+        from_agent = request.get("from_agent", "").lower()
+        to_agent = request.get("to_agent", "").lower()
+        conversation_history = request.get("conversation_history", [])
+        transition_context = request.get("transition_context")
+        
+        if not to_agent:
+            raise HTTPException(status_code=400, detail="전환할 에이전트를 지정해주세요.")
+        
+        # 에이전트 유효성 검사
+        if not agent_manager.get_agent(to_agent):
+            raise HTTPException(status_code=404, detail=f"에이전트를 찾을 수 없습니다: {to_agent}")
+        
+        # 에이전트 전환 실행
+        agent_response, updated_history = await agent_manager.switch_agent_conversation(
+            from_agent=from_agent,
+            to_agent=to_agent,
+            conversation_history=conversation_history,
+            transition_context=transition_context
+        )
+        
+        return {
+            "agent_response": agent_response,
+            "updated_history": updated_history,
+            "switched_to": to_agent,
+            "switched_from": from_agent
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"에이전트 전환 처리 중 오류: {str(e)}")
