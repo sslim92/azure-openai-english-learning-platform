@@ -12,6 +12,7 @@ import os
 from typing import Dict, List, Any, Optional, Tuple
 
 import requests
+from openai import OpenAI
 from fastapi import HTTPException
 
 from ai_server.core.config import (
@@ -122,17 +123,16 @@ class AzureOpenAIClient(BaseAzureClient):
             raise HTTPException(status_code=500, detail=f"Azure OpenAI API 호출 실패: {str(e)}")
 
 
-class AzureQuestionGenerationClient(BaseAzureClient):
-    """Azure OpenAI 문제 생성 전용 클라이언트 (단일 요청용)"""
+class AzureQuestionGenerationClient:
+    """Azure OpenAI 문제 생성 전용 클라이언트 (OpenAI SDK 사용)"""
     
     def __init__(self):
         """클라이언트 초기화"""
-        super().__init__(
-            AZURE_QUESTION_MODEL_ENDPOINT, 
-            AZURE_TTS_API_KEY, 
-            AZURE_QUESTION_MODEL_DEPLOYMENT,  # 문제 생성 전용 배포 또는 기본값
-            AZURE_QUESTION_MODEL_VERSION
+        self.client = OpenAI(
+            api_key=AZURE_TTS_API_KEY,  # 문제 생성용 API 키
+            base_url=AZURE_QUESTION_MODEL_ENDPOINT
         )
+        self.deployment = AZURE_QUESTION_MODEL_DEPLOYMENT
     
     async def generate_question(
         self, 
@@ -142,7 +142,7 @@ class AzureQuestionGenerationClient(BaseAzureClient):
         temperature: float = 0.3
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         """
-        문제 생성 API 호출 (단일 1회성 응답)
+        문제 생성 API 호출 (OpenAI SDK 사용)
         
         Args:
             system_prompt: 시스템 프롬프트 (문제 생성 지시사항)
@@ -154,29 +154,50 @@ class AzureQuestionGenerationClient(BaseAzureClient):
             (원본 응답 텍스트, 파싱된 JSON 객체)
         """
         try:
-            url = self._build_chat_url()
-            
-            # 단일 요청용 메시지 구성
+            # 메시지 구성
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ]
             
-            payload = {
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature
-            }
+            # OpenAI SDK를 사용한 채팅 완성 호출 (동기 방식)
+            print(f"DEBUG - Making request with model: {self.deployment}")
+            print(f"DEBUG - Messages: {messages}")
             
-            response = requests.post(
-                url, 
-                headers=self._get_headers(), 
-                json=payload, 
-                timeout=120
+            response = self.client.chat.completions.create(
+                model=self.deployment,  # gpt-5-test
+                messages=messages,
+                max_completion_tokens=max_tokens,  # max_tokens 대신 max_completion_tokens 사용
+                temperature=1  # 해당 모델에서는 기본값 1만 지원
             )
-            response.raise_for_status()
             
-            return self._extract_content(response.json())
+            # 응답 구조 디버깅
+            print(f"DEBUG - Full response: {response}")
+            print(f"DEBUG - Response choices: {response.choices}")
+            print(f"DEBUG - First choice: {response.choices[0] if response.choices else 'No choices'}")
+            
+            # 응답에서 콘텐츠 추출
+            if not response.choices:
+                print("DEBUG - No choices in response")
+                return "응답에 선택지가 없습니다.", None
+                
+            choice = response.choices[0]
+            message = choice.message
+            content = message.content if message else ""
+            
+            print(f"DEBUG - Message: {message}")
+            print(f"DEBUG - Content: {repr(content)}")
+            
+            # JSON 파싱 시도
+            parsed_json = None
+            if content:
+                try:
+                    parsed_json = json.loads(content)
+                except (json.JSONDecodeError, TypeError):
+                    # JSON 파싱 실패시 원본 텍스트만 반환
+                    pass
+            
+            return content or "빈 응답을 받았습니다.", parsed_json
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Azure OpenAI 문제 생성 API 호출 실패: {str(e)}")

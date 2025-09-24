@@ -199,12 +199,15 @@ async def extract_mistake_reason(request: ChatHistoryExtractionRequest):
         content, parsed_json = await question_client.generate_question(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=200,
-            temperature=0.1  # 일관성 있는 분석을 위해 낮은 temperature 사용
+            max_tokens=500,  # 토큰 제한을 늘려서 응답이 잘리지 않도록 함
+            temperature=1  # 해당 모델에서 기본값 1만 지원
         )
         
         # 응답 정리 (JSON이 아닌 텍스트 응답 예상)
-        extracted_reason = content.strip()
+        print(f"DEBUG - Raw content: {repr(content)}")  # 디버깅용 로깅
+        print(f"DEBUG - Parsed JSON: {repr(parsed_json)}")  # 디버깅용 로깅
+        
+        extracted_reason = content.strip() if content else "응답을 받지 못했습니다."
         
         # 불필요한 따옴표나 마크다운 제거
         if extracted_reason.startswith('"') and extracted_reason.endswith('"'):
