@@ -139,7 +139,7 @@ class AzureQuestionGenerationClient:
         system_prompt: str,
         user_prompt: str,
         max_tokens: int = 1024,
-        temperature: float = 0.3
+        temperature: float = 1
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         """
         문제 생성 API 호출 (OpenAI SDK 사용)
@@ -161,32 +161,20 @@ class AzureQuestionGenerationClient:
             ]
             
             # OpenAI SDK를 사용한 채팅 완성 호출 (동기 방식)
-            print(f"DEBUG - Making request with model: {self.deployment}")
-            print(f"DEBUG - Messages: {messages}")
-            
             response = self.client.chat.completions.create(
                 model=self.deployment,  # gpt-5-test
                 messages=messages,
                 max_completion_tokens=max_tokens,  # max_tokens 대신 max_completion_tokens 사용
-                temperature=1  # 해당 모델에서는 기본값 1만 지원
+                temperature=temperature  # 전달받은 temperature 사용
             )
-            
-            # 응답 구조 디버깅
-            print(f"DEBUG - Full response: {response}")
-            print(f"DEBUG - Response choices: {response.choices}")
-            print(f"DEBUG - First choice: {response.choices[0] if response.choices else 'No choices'}")
             
             # 응답에서 콘텐츠 추출
             if not response.choices:
-                print("DEBUG - No choices in response")
                 return "응답에 선택지가 없습니다.", None
                 
             choice = response.choices[0]
             message = choice.message
             content = message.content if message else ""
-            
-            print(f"DEBUG - Message: {message}")
-            print(f"DEBUG - Content: {repr(content)}")
             
             # JSON 파싱 시도
             parsed_json = None

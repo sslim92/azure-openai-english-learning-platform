@@ -33,49 +33,36 @@ async def generate_similar_question(request: GenerationRequest):
         생성된 문제 데이터 또는 원본 응답
     """
     try:
-        # 시스템 프롬프트 정의 - 영어 문제 생성에 특화
-        system_prompt = """당신은 한국 수능 영어 문제를 생성하는 전문 AI입니다. 
-메기스터디 플랫폼을 위해 고품질의 영어 학습 문제를 생성합니다.
+        # 시스템 프롬프트 - 데이터베이스 필수 필드 강조
+        system_prompt = """당신은 영어 문제를 생성하는 AI입니다.
 
-## 생성 원칙:
-1. 원본 문제와 유사한 난이도와 주제를 유지하되, 완전히 새로운 내용으로 구성
-2. 수능 영어 출제 스타일과 패턴을 엄격히 준수  
-3. 문법적으로 정확하고 자연스러운 영어 사용
-4. 한국 고등학생 수준에 적합한 어휘와 표현 사용
-5. 선택지는 정답 1개, 오답 4개로 구성하며 오답은 그럴듯하되 명확히 틀린 내용
+응답은 반드시 다음 JSON 형식으로만 해주세요. 모든 필드는 필수이며 빈 문자열이라도 포함해야 합니다:
 
-## 문제 유형별 가이드:
-- **빈칸추론**: 논리적 흐름과 문맥을 고려한 적절한 어휘/구문
-- **빈칸추론(문장)**: 전체 글의 논리적 구조에 맞는 연결 문장
-- **글의순서**: 시간순/논리순으로 자연스러운 배열
-- **문장삽입**: 글의 흐름을 해치지 않는 적절한 위치
-- **제목추론**: 글의 핵심 주제를 포괄하는 제목
-- **요약문**: 글의 핵심 내용을 압축한 요약
-
-## 필수 JSON 응답 형식:
 {
-    "id": "ai-generated-[현재타임스탬프]-[랜덤ID]",
+    "id": "ai-generated-123456",
     "year": null,
-    "month": null,  
-    "intent": "[문제 의도 - 예: 빈칸추론, 글의순서, 제목추론 등]",
-    "topic": "[구체적 주제 - 예: 환경보호, 기술발전, 인간관계 등]",
-    "questionText": "[문제 지시문]",
-    "passage": "[영어 지문 - 100-200단어 내외]",
+    "month": null,
+    "intent": "문제 유형 (예: Reading Comprehension, Listening, Grammar 등)",
+    "topic": "주제 (예: Daily Life, Science, History 등)",
+    "questionText": "문제 지시문 (반드시 포함)",
+    "passage": "영어 지문 (듣기 문제가 아닌 경우 반드시 포함, 듣기 문제면 빈 문자열)",
     "options": [
-        {"id": "1", "text": "[선택지 1]"},
-        {"id": "2", "text": "[선택지 2]"}, 
-        {"id": "3", "text": "[선택지 3]"},
-        {"id": "4", "text": "[선택지 4]"},
-        {"id": "5", "text": "[선택지 5]"}
+        {"id": "1", "text": "선택지 1"},
+        {"id": "2", "text": "선택지 2"}, 
+        {"id": "3", "text": "선택지 3"},
+        {"id": "4", "text": "선택지 4"},
+        {"id": "5", "text": "선택지 5"}
     ],
-    "correctOptionId": "[정답 선택지 ID]",
-    "explanation": "[상세 해설 - 정답 근거와 오답 분석 포함]",
-    "difficulty": "[Easy|Medium|Hard]",
-    "listeningScript": null,
-    "generationReason": "[생성 목적과 학습 효과 설명]"
+    "correctOptionId": "정답 번호 (1-5)",
+    "explanation": "정답 해설 (반드시 포함)",
+    "difficulty": "난이도 (Easy, Medium, Hard 중 하나)",
+    "listeningScript": "",
+    "generationReason": "이 문제를 생성한 이유"
 }
 
-반드시 완전한 JSON 형태로만 응답하세요."""
+중요: passage 필드는 절대 null이면 안 됩니다. 듣기 문제라면 빈 문자열 ""을 사용하세요.
+
+다른 설명 없이 JSON만 응답하세요."""
         
         # 입력 데이터를 구조화된 프롬프트로 변환
         input_data = request.input
@@ -96,29 +83,11 @@ async def generate_similar_question(request: GenerationRequest):
             # 오답 분석 기반 생성인지 확인 (explanation에 "약점 분석"이 포함된 경우)
             is_weakness_based = "약점 분석" in explanation
             
-            # 문제 유형별 특화 프롬프트 생성
-            user_prompt = f"""
-## 원본 문제 분석:
-- **문제 유도/주제**: {topic}
-- **난이도**: {difficulty}  
-- **문제 지시문**: {question_text}
-- **정답**: {correct_option}번
-- **원본 해설**: {explanation}
+            # 사용자 프롬프트 간소화
+            user_prompt = f"""원본 문제: {topic} 주제, {difficulty} 난이도
+문제 유형: {question_text}
 
-## 생성 요구사항:
-{f"이 문제는 학습자의 약점을 보완하기 위한 맞춤형 문제입니다. " if is_weakness_based else ""}
-위 원본 문제와 **동일한 문제 유형과 난이도**로 **완전히 새로운 영어 문제**를 생성해주세요.
-
-### 세부 지침:
-1. **문제 유형**: 원본과 동일한 유형 (빈칸추론, 글의순서, 제목추론 등)
-2. **난이도**: {difficulty} 수준 유지
-3. **주제**: {topic}와 관련되되 새로운 소재 사용
-4. **지문**: 원본과 다른 완전히 새로운 영어 텍스트 (100-200단어)
-5. **선택지**: 정답 1개, 그럴듯한 오답 4개
-6. **해설**: 정답 근거와 각 오답이 틀린 이유 명시
-
-원본 문제의 내용을 직접 복사하지 말고, 유형과 패턴만 참고하여 독창적인 문제를 만들어주세요.
-"""
+유사한 새로운 영어 문제를 JSON 형식으로 생성해주세요."""
         else:
             user_prompt = str(input_data)
         
@@ -126,8 +95,8 @@ async def generate_similar_question(request: GenerationRequest):
         content, parsed_json = await question_client.generate_question(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=1024,
-            temperature=0.3
+            max_tokens=5000,  # 토큰 수 증가
+            temperature=1     # Azure OpenAI gpt-5-test는 temperature=1만 지원
         )
         
         # JSON 파싱이 성공한 경우 구조화된 데이터 반환
@@ -199,7 +168,7 @@ async def extract_mistake_reason(request: ChatHistoryExtractionRequest):
         content, parsed_json = await question_client.generate_question(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=500,  # 토큰 제한을 늘려서 응답이 잘리지 않도록 함
+            max_tokens=1000,  # 토큰 제한을 늘려서 응답이 잘리지 않도록 함
             temperature=1  # 해당 모델에서 기본값 1만 지원
         )
         
