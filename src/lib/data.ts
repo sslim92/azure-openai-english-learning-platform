@@ -168,73 +168,90 @@ export async function getUserById(userId: string): Promise<User | null> {
 }
 
 export async function addQuestions(questions: Omit<Question, 'options'>[], options: { questionId: string; id: string; text: string }[]): Promise<void> {
+    console.log('DEBUG - addQuestions called with:', {
+        questionCount: questions.length,
+        optionCount: options.length,
+        firstQuestion: questions[0] ? JSON.stringify(questions[0], null, 2) : 'none',
+        firstOption: options[0] ? JSON.stringify(options[0], null, 2) : 'none'
+    });
+
     const pool = await getDbPool();
     const transaction = pool.transaction();
     try {
         await transaction.begin();
-        const questionTable = new sql.Table('Questions');
-        questionTable.columns.add('QuestionId', sql.NVarChar(100), { nullable: false, primary: true });
-        questionTable.columns.add('Year', sql.Int, { nullable: true });
-        questionTable.columns.add('Month', sql.Int, { nullable: true });
-        questionTable.columns.add('Intent', sql.NVarChar(50), { nullable: true });
-        questionTable.columns.add('Topic', sql.NVarChar(100), { nullable: true });
-        questionTable.columns.add('QuestionText', sql.NVarChar(sql.MAX), { nullable: true });
-        questionTable.columns.add('Passage', sql.NVarChar(sql.MAX), { nullable: true });
-        questionTable.columns.add('CorrectOptionId', sql.NVarChar(10), { nullable: true });
-        questionTable.columns.add('Explanation', sql.NVarChar(sql.MAX), { nullable: true });
-        questionTable.columns.add('Difficulty', sql.NVarChar(20), { nullable: true });
-        questionTable.columns.add('ListeningScript', sql.NVarChar(sql.MAX), { nullable: true });
-        questionTable.columns.add('GenerationReason', sql.NVarChar(sql.MAX), { nullable: true });
+        console.log('DEBUG - Transaction started');
         
-        const uniqueQuestions = new Map<string, Omit<Question, 'options'>>();
-        questions.forEach(q => uniqueQuestions.set(q.id, q));
-        
-        uniqueQuestions.forEach(q => {
-            questionTable.rows.add(q.id, q.year, q.month, q.intent, q.topic, q.questionText, q.passage, q.correctOptionId, q.explanation, q.difficulty, q.listeningScript, q.generationReason);
-        });
+        // 개별 INSERT 문을 사용하여 Questions 테이블에 삽입
+        for (const q of questions) {
+            if (!q.id) {
+                throw new Error('Question ID is required');
+            }
+            
+            console.log('DEBUG - Inserting question:', q.id, q.intent, q.topic);
+            
+            const request = transaction.request();
+            await request
+                .input('QuestionId', sql.NVarChar(100), q.id)
+                .input('Year', sql.Int, q.year || null)
+                .input('Month', sql.Int, q.month || null)
+                .input('Intent', sql.NVarChar(50), q.intent || '')
+                .input('Topic', sql.NVarChar(100), q.topic || '')
+                .input('QuestionText', sql.NVarChar(sql.MAX), q.questionText || '')
+                .input('Passage', sql.NVarChar(sql.MAX), q.passage || '')
+                .input('CorrectOptionId', sql.NVarChar(10), q.correctOptionId || '')
+                .input('Explanation', sql.NVarChar(sql.MAX), q.explanation || '')
+                .input('Difficulty', sql.NVarChar(20), q.difficulty || '')
+                .input('ListeningScript', sql.NVarChar(sql.MAX), q.listeningScript || '')
+                .input('GenerationReason', sql.NVarChar(sql.MAX), q.generationReason || '')
+                .query(`
+                    IF NOT EXISTS (SELECT 1 FROM Questions WHERE QuestionId = @QuestionId)
+                    BEGIN
+                        INSERT INTO Questions (QuestionId, Year, Month, Intent, Topic, QuestionText, Passage, CorrectOptionId, Explanation, Difficulty, ListeningScript, GenerationReason)
+                        VALUES (@QuestionId, @Year, @Month, @Intent, @Topic, @QuestionText, @Passage, @CorrectOptionId, @Explanation, @Difficulty, @ListeningScript, @GenerationReason)
+                    END
+                `);
+        }
+        console.log('DEBUG - Questions inserted successfully');
 
-        const mergeQuestionsQuery = `
-            MERGE Questions AS target
-            USING @questions AS source
-            ON (target.QuestionId = source.QuestionId)
-            WHEN NOT MATCHED THEN
-                INSERT (QuestionId, Year, Month, Intent, Topic, QuestionText, Passage, CorrectOptionId, Explanation, Difficulty, ListeningScript, GenerationReason)
-                VALUES (source.QuestionId, source.Year, source.Month, source.Intent, source.Topic, source.QuestionText, source.Passage, source.CorrectOptionId, source.Explanation, source.Difficulty, source.ListeningScript, source.GenerationReason);
-        `;
-        const questionRequest = transaction.request();
-        questionRequest.input('questions', questionTable);
-        await questionRequest.query(mergeQuestionsQuery);
-
-        const optionTable = new sql.Table('QuestionOptions');
-        optionTable.columns.add('QuestionId', sql.NVarChar(100), { nullable: false });
-        optionTable.columns.add('OptionKey', sql.NVarChar(10), { nullable: false });
-        optionTable.columns.add('OptionText', sql.NVarChar(1000), { nullable: true });
-
-        const uniqueOptions = new Map<string, { questionId: string; id: string; text: string }>();
-        options.forEach(o => uniqueOptions.set(`${o.questionId}-${o.id}`, o));
-
-        uniqueOptions.forEach(o => {
-            optionTable.rows.add(o.questionId, o.id, o.text);
-        });
-
-        const mergeOptionsQuery = `
-            MERGE QuestionOptions AS target
-            USING @options AS source
-            ON (target.QuestionId = source.QuestionId AND target.OptionKey = source.OptionKey)
-            WHEN NOT MATCHED THEN
-                INSERT (QuestionId, OptionKey, OptionText)
-                VALUES (source.QuestionId, source.OptionKey, source.Text)
-            WHEN MATCHED THEN
-                UPDATE SET OptionText = source.Text;
-        `;
-        const optionRequest = transaction.request();
-        optionRequest.input('options', optionTable);
-        await optionRequest.query(mergeOptionsQuery);
+        // 개별 INSERT 문을 사용하여 QuestionOptions 테이블에 삽입
+        for (const o of options) {
+            if (!o.questionId || !o.id) {
+                throw new Error(`Option missing required fields: ${JSON.stringify(o)}`);
+            }
+            
+            console.log('DEBUG - Inserting option:', o.questionId, o.id);
+            
+            const request = transaction.request();
+            await request
+                .input('QuestionId', sql.NVarChar(100), o.questionId)
+                .input('OptionKey', sql.NVarChar(10), o.id)
+                .input('OptionText', sql.NVarChar(1000), o.text || '')
+                .query(`
+                    IF NOT EXISTS (SELECT 1 FROM QuestionOptions WHERE QuestionId = @QuestionId AND OptionKey = @OptionKey)
+                    BEGIN
+                        INSERT INTO QuestionOptions (QuestionId, OptionKey, OptionText)
+                        VALUES (@QuestionId, @OptionKey, @OptionText)
+                    END
+                    ELSE
+                    BEGIN
+                        UPDATE QuestionOptions 
+                        SET OptionText = @OptionText
+                        WHERE QuestionId = @QuestionId AND OptionKey = @OptionKey
+                    END
+                `);
+        }
+        console.log('DEBUG - Options inserted successfully');
         
         await transaction.commit();
+        console.log('DEBUG - Transaction committed successfully');
     } catch (error) {
-        await transaction.rollback();
-        console.error("Error in bulk merge operation:", error);
+        console.error('DEBUG - Error in addQuestions, rolling back transaction:', error);
+        try {
+            await transaction.rollback();
+            console.log('DEBUG - Transaction rolled back successfully');
+        } catch (rollbackError) {
+            console.error('DEBUG - Error rolling back transaction:', rollbackError);
+        }
         throw error;
     }
 }

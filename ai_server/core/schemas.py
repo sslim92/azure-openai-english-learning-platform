@@ -60,3 +60,11 @@ class MistakeAnalysis(BaseModel):
 class GenerationRequest(BaseModel):
     """문제 생성 요청 스키마"""
     input: Dict[str, Any] = Field(..., description="생성 요청 입력 데이터")
+
+
+class ChatHistoryExtractionRequest(BaseModel):
+    """대화 내역에서 오답 이유 추출 요청 스키마"""
+    chatHistory: List[Dict[str, Any]] = Field(..., description="사용자와 AI 간의 대화 내역")
+    selectedOptionText: str = Field(..., description="사용자가 선택한 오답 텍스트")
+    correctOptionText: str = Field(..., description="정답 선택지 텍스트")
+    questionText: str = Field(..., description="문제 텍스트")

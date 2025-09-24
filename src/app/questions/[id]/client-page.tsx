@@ -29,6 +29,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
   
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generatedQuestionId, setGeneratedQuestionId] = useState<string | null>(null);
@@ -54,6 +55,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
   const resetState = () => {
     setIsSubmitted(false);
     setIsCorrect(null);
+    setSelectedOptionId(null);
     setAnalysis(null);
     setError(null);
     setChatHistory([]);
@@ -73,6 +75,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
     }
 
     setIsSubmitted(true);
+    setSelectedOptionId(selectedOptionId);
     setError(null);
     setAnalysis(null);
     setChatHistory([]);
@@ -304,6 +307,13 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
           onNavigateToGenerated={() => {
             if(generatedQuestionId) router.push(`/questions/${generatedQuestionId}`);
           }}
+          selectedOptionText={
+            selectedOptionId ? currentQuestion.options.find(opt => opt.id === selectedOptionId)?.text : undefined
+          }
+          correctOptionText={
+            currentQuestion.options.find(opt => opt.id === currentQuestion.correctOptionId)?.text
+          }
+          questionText={currentQuestion.questionText}
         />
       </div>
     </div>

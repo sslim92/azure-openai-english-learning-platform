@@ -210,6 +210,8 @@ export async function processUserMistake(input: {
        throw new Error('AI 서버가 약점 기반 문제를 생성하지 못했습니다.');
     }
 
+    console.log('DEBUG - Generated question result:', JSON.stringify(generatedQuestionResult, null, 2));
+
     const newQuestion = { ...generatedQuestionResult, passage: generatedQuestionResult.passage || '' };
     newQuestion.generationReason = `이전 문제에서 발견된 약점(${analysisResult.message.substring(0, 50)}...)을 보완하기 위해 생성된 문제입니다.`;
 
@@ -222,8 +224,26 @@ export async function processUserMistake(input: {
     revalidatePath('/progress');
     
     const { options, ...rest } = newQuestion;
-    const questionToInsert = { ...rest, intent: newQuestion.topic, passage: newQuestion.passage || '' };
-    const optionsToInsert = newQuestion.options.map((o: any) => ({ questionId: newQuestion.id, id: o.id, text: o.text }));
+    // intent 필드를 수정하지 말고 원본 그대로 사용
+    const questionToInsert = { 
+      ...rest, 
+      intent: newQuestion.intent || newQuestion.topic, // intent가 없으면 topic 사용
+      passage: newQuestion.passage || '' 
+    };
+    
+    console.log('DEBUG - Question to insert:', JSON.stringify(questionToInsert, null, 2));
+    console.log('DEBUG - Options to insert:', JSON.stringify(newQuestion.options?.slice(0, 2), null, 2)); // 첫 2개만 로그
+    
+    const optionsToInsert = newQuestion.options?.map((o: any) => ({ 
+      questionId: newQuestion.id, 
+      id: o.id, 
+      text: o.text 
+    })) || [];
+    
+    if (optionsToInsert.length === 0) {
+      throw new Error('생성된 문제에 선택지가 없습니다.');
+    }
+    
     await addQuestions([questionToInsert], optionsToInsert);
     revalidatePath('/questions');
     revalidatePath('/');
@@ -276,18 +296,28 @@ export async function createSimilarQuestion(originalQuestion: Question) {
         const newQuestion = await resp.json().catch(() => ({} as any));
         const q = newQuestion as Question;
         
+        console.log('DEBUG - Generated question from createSimilarQuestion:', JSON.stringify(q, null, 2));
+        
         if (!q || !q.id) {
             throw new Error('AI server did not return a valid question');
         }
         
         const { options, ...rest } = q;
-        const questionRecord = { ...rest, intent: q.topic, passage: q.passage || '' };
+        // intent 필드를 올바르게 처리
+        const questionRecord = { 
+          ...rest, 
+          intent: q.intent || q.topic, // intent가 없으면 topic 사용
+          passage: q.passage || '' 
+        };
         
         const optionsRecords = (q.options ?? []).map(o => ({
             questionId: q.id,
             id: o.id,
             text: o.text,
         }));
+
+        console.log('DEBUG - Question record for DB:', JSON.stringify(questionRecord, null, 2));
+        console.log('DEBUG - Options records for DB:', JSON.stringify(optionsRecords.slice(0, 2), null, 2));
 
         await addQuestions([questionRecord], optionsRecords);
         revalidatePath('/questions');
@@ -301,6 +331,39 @@ export async function createSimilarQuestion(originalQuestion: Question) {
     } catch (error) {
         console.error("Error creating similar question:", error);
         const errorMessage = error instanceof Error ? error.message : "유사 문제 생성 중 알 수 없는 오류가 발생했습니다.";
+        return { success: false, error: errorMessage };
+    }
+}
+
+
+export async function extractMistakeReasonFromChat(input: {
+    chatHistory: ChatMessage[];
+    selectedOptionText: string;
+    correctOptionText: string;
+    questionText: string;
+}): Promise<{ success: boolean; extractedReason?: string; error?: string }> {
+    try {
+        const payload = {
+            chatHistory: input.chatHistory,
+            selectedOptionText: input.selectedOptionText,
+            correctOptionText: input.correctOptionText,
+            questionText: input.questionText
+        };
+
+        const result = await postToAiServer('/extract-mistake-reason', payload);
+        
+        if (!result || typeof result.extractedReason !== 'string') {
+            throw new Error('AI 서버가 오답 이유를 추출하지 못했습니다.');
+        }
+        
+        return {
+            success: true,
+            extractedReason: result.extractedReason
+        };
+        
+    } catch (error) {
+        console.error("Error extracting mistake reason:", error);
+        const errorMessage = error instanceof Error ? error.message : "오답 이유 추출 중 알 수 없는 오류가 발생했습니다.";
         return { success: false, error: errorMessage };
     }
 }

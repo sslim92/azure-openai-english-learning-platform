@@ -39,10 +39,59 @@ interface AiMentorProps {
   setMentorInteraction: (interaction: MentorInteraction) => void;
   generatedQuestionId: string | null;
   onNavigateToGenerated: () => void;
+  selectedOptionText?: string;
+  correctOptionText?: string;
+  questionText?: string;
 }
 
-function ReasonDialog({ onReasonSubmit }: { onReasonSubmit: (reason: string) => void }) {
+function ReasonDialog({ 
+    onReasonSubmit, 
+    chatHistory, 
+    selectedOptionText, 
+    correctOptionText, 
+    questionText 
+}: { 
+    onReasonSubmit: (reason: string) => void;
+    chatHistory: ChatMessage[];
+    selectedOptionText?: string;
+    correctOptionText?: string;
+    questionText?: string;
+}) {
     const [reason, setReason] = useState('');
+    const [isExtracting, setIsExtracting] = useState(false);
+
+    const handleAutoExtract = async () => {
+        if (!chatHistory.length || !selectedOptionText || !correctOptionText || !questionText) {
+            return;
+        }
+
+        setIsExtracting(true);
+        try {
+            const { extractMistakeReasonFromChat } = await import('@/lib/actions');
+            const result = await extractMistakeReasonFromChat({
+                chatHistory,
+                selectedOptionText,
+                correctOptionText,
+                questionText
+            });
+            
+            if (result.success && result.extractedReason) {
+                setReason(result.extractedReason);
+            }
+        } catch (error) {
+            console.error('오답 이유 자동 추출 실패:', error);
+            // 실패해도 사용자가 직접 입력할 수 있게 에러 처리는 조용히
+        } finally {
+            setIsExtracting(false);
+        }
+    };
+
+    // 다이얼로그가 열릴 때 자동으로 추출 시도
+    useEffect(() => {
+        if (chatHistory.length > 0 && selectedOptionText && correctOptionText && questionText) {
+            handleAutoExtract();
+        }
+    }, [chatHistory, selectedOptionText, correctOptionText, questionText]);
 
     const handleSubmit = () => {
         if (reason.trim()) {
@@ -55,15 +104,36 @@ function ReasonDialog({ onReasonSubmit }: { onReasonSubmit: (reason: string) => 
             <DialogHeader>
                 <DialogTitle>AI 메기 멘토의 약점 분석</DialogTitle>
                 <DialogDescription>
-                    어떤 생각의 흐름으로 그 답을 고르셨나요? 간단하게 이유를 알려주시면 AI 메기 멘토가 날카로운 수염으로 약점을 찾아내고 성장을 위한 맞춤 문제를 만들어 드려요.
+                    대화 내역을 분석해서 오답 이유를 추출했어요. 내용을 확인하고 수정하거나 직접 작성해주세요.
                 </DialogDescription>
             </DialogHeader>
-            <Textarea
-                placeholder="예: 지문의 특정 단어를 잘못 해석했어요, 문법 구조가 헷갈렸어요, 선택지들이 너무 비슷해 보였어요 등"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                rows={4}
-            />
+            <div className="space-y-3">
+                {isExtracting && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        대화 내역에서 오답 이유를 분석 중...
+                    </div>
+                )}
+                <Textarea
+                    placeholder="예: 지문의 특정 단어를 잘못 해석했어요, 문법 구조가 헷갈렸어요, 선택지들이 너무 비슷해 보였어요 등"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    rows={4}
+                    disabled={isExtracting}
+                />
+                {chatHistory.length > 0 && !isExtracting && (
+                    <Button 
+                        type="button" 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={handleAutoExtract}
+                        className="self-start"
+                    >
+                        <BrainCircuit className="h-4 w-4 mr-2" />
+                        대화에서 다시 분석하기
+                    </Button>
+                )}
+            </div>
             <DialogFooter>
                 <DialogClose asChild>
                     <Button type="button" variant="secondary">취소</Button>
@@ -89,6 +159,9 @@ export default function AiMentor({
   setMentorInteraction,
   generatedQuestionId,
   onNavigateToGenerated,
+  selectedOptionText,
+  correctOptionText,
+  questionText,
 }: AiMentorProps) {
   const [tutorInput, setTutorInput] = useState('');
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -184,7 +257,13 @@ export default function AiMentor({
                       AI 약점 분석 & 맞춤 문제
                   </Button>
               </DialogTrigger>
-              <ReasonDialog onReasonSubmit={onReasonSubmit} />
+              <ReasonDialog 
+                  onReasonSubmit={onReasonSubmit}
+                  chatHistory={chatHistory}
+                  selectedOptionText={selectedOptionText}
+                  correctOptionText={correctOptionText}
+                  questionText={questionText}
+              />
           </Dialog>
       );
 

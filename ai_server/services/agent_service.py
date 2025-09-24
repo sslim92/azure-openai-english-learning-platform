@@ -276,6 +276,7 @@ class ChatAgent:
     
     async def chat(self, user_input: str, message_history: List[BaseMessage]) -> str:
         """사용자 입력에 대한 에이전트 응답 생성"""
+        
         # 입력 전처리
         processed_input = self._preprocess_input(user_input)
         
@@ -350,10 +351,20 @@ class AgentManager:
         self, 
         agent_name: str, 
         user_input: str, 
+        message_history: Optional[List[Dict]] = None,
         context: Optional[Dict[str, Any]] = None,
         temperature: Optional[float] = None
     ) -> str:
-        """통합 에이전트 응답 생성"""
+        """
+        통합 에이전트 응답 생성 (멀티턴 대화 지원)
+        
+        Args:
+            agent_name: 사용할 에이전트 이름
+            user_input: 사용자 입력
+            message_history: 이전 대화 기록 (Dict 리스트)
+            context: 추가 컨텍스트 정보
+            temperature: 응답 창의성 수준
+        """
         agent = self.get_agent(agent_name)
         if not agent:
             raise ValueError(f"에이전트 '{agent_name}'를 찾을 수 없습니다.")
@@ -362,17 +373,93 @@ class AgentManager:
         if temperature is not None:
             agent.temperature = temperature
         
-        # 컨텍스트 처리
-        message_history = []
+        # 대화 기록을 BaseMessage 객체로 변환
+        history_messages = []
+        if message_history:
+            history_messages = build_message_history(message_history)
+        
+        # 컨텍스트가 있으면 시스템 메시지로 추가
         if context:
             context_msg = f"추가 컨텍스트: {context}"
-            message_history.append(SystemMessage(content=context_msg))
+            history_messages.insert(0, SystemMessage(content=context_msg))
         
-        return await agent.chat(user_input, message_history)
+        return await agent.chat(user_input, history_messages)
     
     async def analyze_mistake(self, question_data: Dict[str, Any]) -> str:
         """오답 분석 요청"""
         return await self.get_agent_response("analyzer", json.dumps(question_data), temperature=0.3)
+    
+    async def continue_conversation(
+        self,
+        agent_name: str,
+        user_message: str,
+        conversation_history: List[Dict[str, str]],
+        system_context: Optional[str] = None
+    ) -> Tuple[str, List[Dict[str, str]]]:
+        """
+        멀티턴 대화 진행
+        
+        Args:
+            agent_name: 사용할 에이전트 이름
+            user_message: 사용자 메시지
+            conversation_history: 기존 대화 기록
+            system_context: 시스템 컨텍스트 (문제 정보 등)
+            
+        Returns:
+            (에이전트 응답, 업데이트된 대화 기록)
+        """
+        # 시스템 컨텍스트를 포함한 대화 기록 준비
+        full_history = conversation_history.copy()
+        
+        # 시스템 컨텍스트가 있고 대화 기록이 비어있다면 시스템 메시지 추가
+        if system_context and not full_history:
+            full_history.insert(0, {"role": "system", "content": system_context})
+        
+        # 에이전트 응답 생성
+        agent_response = await self.get_agent_response(
+            agent_name=agent_name,
+            user_input=user_message,
+            message_history=full_history
+        )
+        
+        # 대화 기록 업데이트
+        updated_history = full_history.copy()
+        updated_history.append({"role": "user", "content": user_message})
+        updated_history.append({"role": "assistant", "content": agent_response})
+        
+        return agent_response, updated_history
+    
+    async def switch_agent_conversation(
+        self,
+        from_agent: str,
+        to_agent: str,
+        conversation_history: List[Dict[str, str]],
+        transition_context: Optional[str] = None
+    ) -> Tuple[str, List[Dict[str, str]]]:
+        """
+        에이전트 간 대화 전환 (예: analyzer -> tutor)
+        
+        Args:
+            from_agent: 이전 에이전트
+            to_agent: 새로운 에이전트  
+            conversation_history: 기존 대화 기록
+            transition_context: 전환 컨텍스트
+            
+        Returns:
+            (새 에이전트 응답, 업데이트된 대화 기록)
+        """
+        # 전환 컨텍스트 메시지 생성
+        if transition_context:
+            transition_msg = f"[에이전트 전환: {from_agent} -> {to_agent}] {transition_context}"
+        else:
+            transition_msg = f"안녕하세요! {to_agent} 에이전트가 대화를 이어받겠습니다."
+        
+        # 새 에이전트로 대화 진행
+        return await self.continue_conversation(
+            agent_name=to_agent,
+            user_message=transition_msg,
+            conversation_history=conversation_history
+        )
 
 
 # ================================
@@ -380,24 +467,70 @@ class AgentManager:
 # ================================
 
 def build_message_history(messages: List[Dict], system_prefix: Optional[str] = None) -> List[BaseMessage]:
-    """메시지 딕셔너리를 BaseMessage 객체로 변환"""
+    """
+    메시지 딕셔너리를 BaseMessage 객체로 변환 (멀티턴 대화 지원)
+    
+    Args:
+        messages: 메시지 딕셔너리 목록 [{"role": "user", "content": "..."}, ...]
+        system_prefix: 추가할 시스템 메시지
+        
+    Returns:
+        BaseMessage 객체 목록
+    """
     history: List[BaseMessage] = []
     
+    # 시스템 접두사 추가
     if system_prefix:
         history.append(SystemMessage(content=system_prefix))
     
+    # 메시지 변환 (순서 보장)
     for msg in messages:
-        role = msg.get("role", "")
+        role = msg.get("role", "").lower()
         content = msg.get("content", "")
         
-        if role in ("assistant", "model"):
+        if not content:  # 빈 메시지 스킵
+            continue
+            
+        if role in ("assistant", "model", "ai"):
             history.append(AIMessage(content=content))
         elif role == "system":
             history.append(SystemMessage(content=content))
-        else:  # user, human 또는 기타
+        elif role in ("user", "human"):
+            history.append(HumanMessage(content=content))
+        else:
+            # 알 수 없는 role은 user로 처리
             history.append(HumanMessage(content=content))
     
     return history
+
+
+def create_conversation_context(question_data: Dict[str, Any]) -> str:
+    """
+    문제 데이터를 대화 컨텍스트로 변환
+    
+    Args:
+        question_data: 문제 정보
+        
+    Returns:
+        컨텍스트 문자열
+    """
+    question_text = question_data.get('questionText', '')
+    passage = question_data.get('passage', '')
+    options = question_data.get('options', [])
+    
+    context_parts = [f"현재 문제: {question_text}"]
+    
+    if passage:
+        context_parts.append(f"지문: {passage}")
+    
+    if options:
+        context_parts.append("선택지:")
+        for opt in options:
+            opt_id = opt.get('id', '')
+            opt_text = opt.get('text', '')
+            context_parts.append(f"  {opt_id}: {opt_text}")
+    
+    return "\n".join(context_parts)
 
 
 # ================================

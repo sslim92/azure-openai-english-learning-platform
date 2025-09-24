@@ -8,15 +8,17 @@ Azure OpenAI API와의 통신을 담당하는 클래스들을 정의합니다.
 import json
 import base64
 import re
+import os
 from typing import Dict, List, Any, Optional, Tuple
 
 import requests
+from openai import OpenAI
 from fastapi import HTTPException
 
 from ai_server.core.config import (
     AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION,
     AZURE_TTS_ENDPOINT, AZURE_TTS_API_KEY, AZURE_TTS_DEPLOYMENT, AZURE_TTS_API_VERSION, AZURE_TTS_VOICE,
-    AZURE_QUESTION_MODEL_DEPLOYMENT
+    AZURE_QUESTION_MODEL_DEPLOYMENT, AZURE_QUESTION_MODEL_VERSION, AZURE_QUESTION_MODEL_ENDPOINT
 )
 
 
@@ -121,27 +123,26 @@ class AzureOpenAIClient(BaseAzureClient):
             raise HTTPException(status_code=500, detail=f"Azure OpenAI API 호출 실패: {str(e)}")
 
 
-class AzureQuestionGenerationClient(BaseAzureClient):
-    """Azure OpenAI 문제 생성 전용 클라이언트 (단일 요청용)"""
+class AzureQuestionGenerationClient:
+    """Azure OpenAI 문제 생성 전용 클라이언트 (OpenAI SDK 사용)"""
     
     def __init__(self):
         """클라이언트 초기화"""
-        super().__init__(
-            AZURE_OPENAI_ENDPOINT, 
-            AZURE_OPENAI_API_KEY, 
-            AZURE_QUESTION_MODEL_DEPLOYMENT or AZURE_OPENAI_DEPLOYMENT,  # 문제 생성 전용 배포 또는 기본값
-            AZURE_OPENAI_API_VERSION
+        self.client = OpenAI(
+            api_key=AZURE_TTS_API_KEY,  # 문제 생성용 API 키
+            base_url=AZURE_QUESTION_MODEL_ENDPOINT
         )
+        self.deployment = AZURE_QUESTION_MODEL_DEPLOYMENT
     
     async def generate_question(
         self, 
         system_prompt: str,
         user_prompt: str,
         max_tokens: int = 1024,
-        temperature: float = 0.3
+        temperature: float = 1
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         """
-        문제 생성 API 호출 (단일 1회성 응답)
+        문제 생성 API 호출 (OpenAI SDK 사용)
         
         Args:
             system_prompt: 시스템 프롬프트 (문제 생성 지시사항)
@@ -153,29 +154,38 @@ class AzureQuestionGenerationClient(BaseAzureClient):
             (원본 응답 텍스트, 파싱된 JSON 객체)
         """
         try:
-            url = self._build_chat_url()
-            
-            # 단일 요청용 메시지 구성
+            # 메시지 구성
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ]
             
-            payload = {
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature
-            }
-            
-            response = requests.post(
-                url, 
-                headers=self._get_headers(), 
-                json=payload, 
-                timeout=120
+            # OpenAI SDK를 사용한 채팅 완성 호출 (동기 방식)
+            response = self.client.chat.completions.create(
+                model=self.deployment,  # gpt-5-test
+                messages=messages,
+                max_completion_tokens=max_tokens,  # max_tokens 대신 max_completion_tokens 사용
+                temperature=temperature  # 전달받은 temperature 사용
             )
-            response.raise_for_status()
             
-            return self._extract_content(response.json())
+            # 응답에서 콘텐츠 추출
+            if not response.choices:
+                return "응답에 선택지가 없습니다.", None
+                
+            choice = response.choices[0]
+            message = choice.message
+            content = message.content if message else ""
+            
+            # JSON 파싱 시도
+            parsed_json = None
+            if content:
+                try:
+                    parsed_json = json.loads(content)
+                except (json.JSONDecodeError, TypeError):
+                    # JSON 파싱 실패시 원본 텍스트만 반환
+                    pass
+            
+            return content or "빈 응답을 받았습니다.", parsed_json
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Azure OpenAI 문제 생성 API 호출 실패: {str(e)}")
