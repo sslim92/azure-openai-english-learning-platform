@@ -306,6 +306,39 @@ export async function createSimilarQuestion(originalQuestion: Question) {
 }
 
 
+export async function extractMistakeReasonFromChat(input: {
+    chatHistory: ChatMessage[];
+    selectedOptionText: string;
+    correctOptionText: string;
+    questionText: string;
+}): Promise<{ success: boolean; extractedReason?: string; error?: string }> {
+    try {
+        const payload = {
+            chatHistory: input.chatHistory,
+            selectedOptionText: input.selectedOptionText,
+            correctOptionText: input.correctOptionText,
+            questionText: input.questionText
+        };
+
+        const result = await postToAiServer('/extract-mistake-reason', payload);
+        
+        if (!result || typeof result.extractedReason !== 'string') {
+            throw new Error('AI 서버가 오답 이유를 추출하지 못했습니다.');
+        }
+        
+        return {
+            success: true,
+            extractedReason: result.extractedReason
+        };
+        
+    } catch (error) {
+        console.error("Error extracting mistake reason:", error);
+        const errorMessage = error instanceof Error ? error.message : "오답 이유 추출 중 알 수 없는 오류가 발생했습니다.";
+        return { success: false, error: errorMessage };
+    }
+}
+
+
 // --- Server Actions for data fetching and auth ---
 
 export async function fetchAllQuestions(): Promise<Question[]> {

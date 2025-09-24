@@ -8,6 +8,7 @@ Azure OpenAI API와의 통신을 담당하는 클래스들을 정의합니다.
 import json
 import base64
 import re
+import os
 from typing import Dict, List, Any, Optional, Tuple
 
 import requests
@@ -16,7 +17,7 @@ from fastapi import HTTPException
 from ai_server.core.config import (
     AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION,
     AZURE_TTS_ENDPOINT, AZURE_TTS_API_KEY, AZURE_TTS_DEPLOYMENT, AZURE_TTS_API_VERSION, AZURE_TTS_VOICE,
-    AZURE_QUESTION_MODEL_DEPLOYMENT
+    AZURE_QUESTION_MODEL_DEPLOYMENT, AZURE_QUESTION_MODEL_VERSION, AZURE_QUESTION_MODEL_ENDPOINT
 )
 
 
@@ -127,10 +128,10 @@ class AzureQuestionGenerationClient(BaseAzureClient):
     def __init__(self):
         """클라이언트 초기화"""
         super().__init__(
-            AZURE_OPENAI_ENDPOINT, 
-            AZURE_OPENAI_API_KEY, 
-            AZURE_QUESTION_MODEL_DEPLOYMENT or AZURE_OPENAI_DEPLOYMENT,  # 문제 생성 전용 배포 또는 기본값
-            AZURE_OPENAI_API_VERSION
+            AZURE_QUESTION_MODEL_ENDPOINT, 
+            AZURE_TTS_API_KEY, 
+            AZURE_QUESTION_MODEL_DEPLOYMENT,  # 문제 생성 전용 배포 또는 기본값
+            AZURE_QUESTION_MODEL_VERSION
         )
     
     async def generate_question(
