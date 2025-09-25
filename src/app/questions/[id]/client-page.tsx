@@ -159,8 +159,6 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
         return;
     }
     
-    setChatHistory(prev => [...prev, {role: 'user', content: `제가 이 답을 고른 이유는... ${userReason}`}]);
-
     try {
         const result = await processUserMistake({
             userId: user.uid,
@@ -173,11 +171,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
             throw new Error(result.error || 'AI 약점 분석 및 문제 생성에 실패했습니다.');
         }
 
-        const analysisMessage = `**AI 약점 분석:**\n${result.analysis}`;
-        const nextStepMessage = `\n\n이 분석을 바탕으로, 당신의 약점을 보완하기 위한 새로운 AI 생성 문제를 준비했습니다. 아래 버튼을 눌러 바로 도전해보세요!`;
-        
         setAnalysis(result.analysis);
-        setChatHistory(prev => [...prev, {role: 'model', content: analysisMessage + nextStepMessage}]);
         setGeneratedQuestionId(result.generatedQuestion.id);
         
         toast({
