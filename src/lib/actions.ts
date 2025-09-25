@@ -321,7 +321,6 @@ export async function createSimilarQuestion(originalQuestion: Question) {
 
         await addQuestions([questionRecord], optionsRecords);
         revalidatePath('/questions');
-        revalidatePath('/random-quiz');
 
         return {
             success: true,
