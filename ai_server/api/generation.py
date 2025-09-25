@@ -30,16 +30,15 @@ async def generate_similar_question(request: GenerationRequest):
         request: 문제 생성 요청 데이터
         
     Returns:
-        생성된 문제 데이터 또는 원본 응답
+        생성된 문제 데이터 (JSON 형식)
     """
     try:
         # 시스템 프롬프트 - 데이터베이스 필수 필드 강조
         system_prompt = """당신은 영어 문제를 생성하는 AI입니다.
-
-응답은 반드시 다음 JSON 형식으로만 해주세요. 모든 필드는 필수이며 빈 문자열이라도 포함해야 합니다:
+응답은 반드시 다음 JSON 형식으로만 해주세요.
 
 {
-    "id": "ai-generated-123456",
+    "id": "ai-[타임스탬프(유닉스형식)]-[3자리 숫자 난수]",
     "year": null,
     "month": null,
     "intent": "문제 유형 (예: Reading Comprehension, Listening, Grammar 등)",
@@ -47,20 +46,18 @@ async def generate_similar_question(request: GenerationRequest):
     "questionText": "문제 지시문 (반드시 포함)",
     "passage": "영어 지문 (듣기 문제가 아닌 경우 반드시 포함, 듣기 문제면 빈 문자열)",
     "options": [
-        {"id": "1", "text": "선택지 1"},
-        {"id": "2", "text": "선택지 2"}, 
-        {"id": "3", "text": "선택지 3"},
-        {"id": "4", "text": "선택지 4"},
-        {"id": "5", "text": "선택지 5"}
+        {"id": "a", "text": "선택지 1"},
+        {"id": "b", "text": "선택지 2"}, 
+        {"id": "c", "text": "선택지 3"},
+        {"id": "d", "text": "선택지 4"},
+        {"id": "e", "text": "선택지 5"}
     ],
-    "correctOptionId": "정답 번호 (1-5)",
+    "correctOptionId": "정답 번호 (a-e)",
     "explanation": "정답 해설 (반드시 포함)",
     "difficulty": "난이도 (Easy, Medium, Hard 중 하나)",
     "listeningScript": "",
-    "generationReason": "이 문제를 생성한 이유"
+    "generationReason": "두 문장만 작성하세요. {{weakness}}을 겨냥해 {{design_features}}로 보완하도록 설계했습니다. 이를 통해 {{target_skill}}이 강화되고 {{expected_outcome}}이/가 향상됩니다."
 }
-
-중요: passage 필드는 절대 null이면 안 됩니다. 듣기 문제라면 빈 문자열 ""을 사용하세요.
 
 다른 설명 없이 JSON만 응답하세요."""
         

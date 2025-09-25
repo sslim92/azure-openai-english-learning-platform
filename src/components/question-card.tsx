@@ -11,7 +11,7 @@ interface QuestionCardProps {
 
 export function QuestionCard({ question }: QuestionCardProps) {
   
-  const isAiGenerated = question.id.startsWith('ai-generated-');
+  const isAiGenerated = question.id.startsWith('ai');
   const fullQuestionText = `${question.questionText}\n\n${question.passage || ''}`;
 
   return (
