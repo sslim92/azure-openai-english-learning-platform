@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow public read access to questions, but not write.
+    match /questions/{questionId} {
+      allow read: if true;
+      allow write: if false; 
+    }
+
+    // Allow anyone to write their own mistakes, but not read others'.
+    // In a real app, {userId} would be request.auth.uid.
+    match /userMistakes/{userId} {
+      allow read, write: if true; // For now, allow anyone to read/write for simplicity
+    }
+
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

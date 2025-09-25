@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run AI server (dev)",
+			"type": "shell",
+			"command": "uvicorn ai_server.main:app --reload --port 8001",
+			"isBackground": true,
+			"group": "build"
+		}
+	]
+}
