@@ -63,6 +63,33 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
     setGeneratedQuestionId(null);
   };
 
+  const handleTryAnotherQuestion = async () => {
+    try {
+      // 현재 문제를 제외한 랜덤 문제 가져오기
+      const response = await fetch(`/api/random-question?exclude=${currentQuestion.id}`);
+      const data = await response.json();
+      
+      if (data.questionId) {
+        // 새로운 문제 페이지로 이동
+        router.push(`/questions/${data.questionId}`);
+      } else {
+        toast({
+          variant: "destructive",
+          title: "문제를 찾을 수 없습니다",
+          description: "다른 문제를 찾을 수 없습니다. 문제 은행에서 직접 선택해주세요.",
+        });
+        router.push('/questions');
+      }
+    } catch (error) {
+      console.error('Failed to get random question:', error);
+      toast({
+        variant: "destructive",
+        title: "오류 발생",
+        description: "문제를 불러오는 중 오류가 발생했습니다.",
+      });
+    }
+  };
+
   const handleAnswerSubmit = async (selectedOptionId: string) => {
     if (!user) {
         toast({
@@ -284,6 +311,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
           question={currentQuestion}
           isSubmitted={isSubmitted}
           onAnswerSubmit={handleAnswerSubmit}
+          onTryAnotherQuestion={handleTryAnotherQuestion}
           key={currentQuestion.id}
         />
         <AiMentor

@@ -21,6 +21,7 @@ export default function SearchSection({ allQuestions, availableYears }: SearchSe
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [availableMonths, setAvailableMonths] = useState<number[]>([]);
   const [showAiOnly, setShowAiOnly] = useState(false);
+  const [showOriginalOnly, setShowOriginalOnly] = useState(false);
 
   useEffect(() => {
     const monthsForYear = [...new Set(allQuestions.filter(q => selectedYear === 'all' || q.year === parseInt(selectedYear)).map(q => q.month).filter(m => m !== undefined) as number[])].sort((a,b) => b-a);
@@ -31,25 +32,37 @@ export default function SearchSection({ allQuestions, availableYears }: SearchSe
 
   const filteredQuestions = useMemo(() => {
     return allQuestions.filter(question => {
-      if (showAiOnly && !question.id.startsWith('ai-generated-')) {
+      // AI 생성 문제만 보기가 선택된 경우
+      if (showAiOnly && !question.id.startsWith('ai-')) {
           return false;
       }
+      
+      // 기출 문제만 보기가 선택된 경우
+      if (showOriginalOnly && !question.id.startsWith('english-')) {
+          return false;
+      }
+      
       const queryMatch = searchQuery === '' || question.questionText.toLowerCase().includes(searchQuery.toLowerCase()) || question.topic.toLowerCase().includes(searchQuery.toLowerCase());
       const yearMatch = selectedYear === 'all' || question.year === parseInt(selectedYear);
       const monthMatch = selectedMonth === 'all' || question.month === parseInt(selectedMonth);
 
-      // if year and month are selected, AI questions should not be shown unless they are the only filter
+      // AI 생성 문제만 보기가 선택된 경우
       if (showAiOnly) {
-        return question.id.startsWith('ai-generated-') && queryMatch;
+        return question.id.startsWith('ai-') && queryMatch;
+      }
+      
+      // 기출 문제만 보기가 선택된 경우
+      if (showOriginalOnly) {
+        return question.id.startsWith('english-') && queryMatch && yearMatch && monthMatch;
       }
 
       return queryMatch && yearMatch && monthMatch;
     });
-  }, [allQuestions, searchQuery, selectedYear, selectedMonth, showAiOnly]);
+  }, [allQuestions, searchQuery, selectedYear, selectedMonth, showAiOnly, showOriginalOnly]);
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
         <div className="md:col-span-2">
             <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -58,11 +71,11 @@ export default function SearchSection({ allQuestions, availableYears }: SearchSe
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-10"
-                    disabled={showAiOnly}
+                    disabled={showAiOnly || showOriginalOnly}
                 />
             </div>
         </div>
-        <Select value={selectedYear} onValueChange={setSelectedYear} disabled={showAiOnly}>
+        <Select value={selectedYear} onValueChange={setSelectedYear} disabled={showAiOnly || showOriginalOnly}>
           <SelectTrigger>
             <SelectValue placeholder="연도 선택" />
           </SelectTrigger>
@@ -73,7 +86,7 @@ export default function SearchSection({ allQuestions, availableYears }: SearchSe
             ))}
           </SelectContent>
         </Select>
-        <Select value={selectedMonth} onValueChange={setSelectedMonth} disabled={showAiOnly || availableMonths.length === 0}>
+        <Select value={selectedMonth} onValueChange={setSelectedMonth} disabled={showAiOnly || showOriginalOnly || availableMonths.length === 0}>
           <SelectTrigger>
             <SelectValue placeholder="월 선택" />
           </SelectTrigger>
@@ -84,11 +97,33 @@ export default function SearchSection({ allQuestions, availableYears }: SearchSe
             ))}
           </SelectContent>
         </Select>
-         <div className="flex items-center justify-end space-x-2">
-            <Checkbox id="ai-only" checked={showAiOnly} onCheckedChange={(checked) => setShowAiOnly(Boolean(checked))} />
+        <div className="flex flex-col space-y-2">
+          <div className="flex items-center space-x-2">
+            <Checkbox 
+              id="ai-only" 
+              checked={showAiOnly} 
+              onCheckedChange={(checked) => {
+                setShowAiOnly(Boolean(checked));
+                if (checked) setShowOriginalOnly(false);
+              }} 
+            />
             <Label htmlFor="ai-only" className="text-sm font-medium leading-none cursor-pointer">
-                AI 생성 문제만 보기
+                AI 생성 문제
             </Label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Checkbox 
+              id="original-only" 
+              checked={showOriginalOnly} 
+              onCheckedChange={(checked) => {
+                setShowOriginalOnly(Boolean(checked));
+                if (checked) setShowAiOnly(false);
+              }} 
+            />
+            <Label htmlFor="original-only" className="text-sm font-medium leading-none cursor-pointer">
+                기출 문제
+            </Label>
+          </div>
         </div>
       </div>
       

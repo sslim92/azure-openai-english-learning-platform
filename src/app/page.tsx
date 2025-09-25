@@ -12,6 +12,33 @@ import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import Link from 'next/link';
 
+function RandomQuestionButton() {
+  const router = useRouter();
+
+  const handleRandomQuestion = async () => {
+    try {
+      // 클라이언트 사이드에서 API 호출로 랜덤 문제 ID 가져오기
+      const response = await fetch('/api/random-question');
+      const data = await response.json();
+      
+      if (data.questionId) {
+        router.push(`/questions/${data.questionId}`);
+      }
+    } catch (error) {
+      console.error('Failed to get random question:', error);
+      // 실패 시 문제 은행으로 이동
+      router.push('/questions');
+    }
+  };
+
+  return (
+    <Button onClick={handleRandomQuestion} size="lg" className="flex-1">
+      <RefreshCw className="mr-2 h-4 w-4" />
+      문제 은행에서 랜덤 선택
+    </Button>
+  );
+}
+
 export default function DashboardPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -121,12 +148,7 @@ export default function DashboardPage() {
                     <CardDescription>다양한 방법으로 학습을 시작하고 메기를 성장시켜보세요.</CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col sm:flex-row gap-4">
-                    <Button asChild size="lg" className="flex-1">
-                        <Link href="/random-quiz">
-                            <RefreshCw className="mr-2 h-4 w-4" />
-                            랜덤 문제로 실력 점검
-                        </Link>
-                    </Button>
+                    <RandomQuestionButton />
                     <Button asChild size="lg" variant="outline" className="flex-1">
                         <Link href="/questions">
                             <BookOpen className="mr-2 h-4 w-4" />

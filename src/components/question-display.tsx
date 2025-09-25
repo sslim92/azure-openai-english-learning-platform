@@ -8,7 +8,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { textToSpeech } from '@/lib/actions';
-import { Loader2, PlayCircle, Volume2, Info, Sparkles } from 'lucide-react';
+import { Loader2, PlayCircle, Volume2, Info, Sparkles, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
@@ -16,12 +16,14 @@ interface QuestionDisplayProps {
   question: Question;
   isSubmitted?: boolean;
   onAnswerSubmit?: (selectedOption: string) => void;
+  onTryAnotherQuestion?: () => void;
 }
 
 export default function QuestionDisplay({ 
   question, 
   isSubmitted = false,
   onAnswerSubmit,
+  onTryAnotherQuestion,
 }: QuestionDisplayProps) {
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [audioDataUri, setAudioDataUri] = useState<string | null>(null);
@@ -125,6 +127,14 @@ export default function QuestionDisplay({
             <div className="mt-6">
               <Button type="submit" disabled={!selectedOption}>
                 답안 제출
+              </Button>
+            </div>
+          )}
+          {isSubmitted && onTryAnotherQuestion && (
+            <div className="mt-6">
+              <Button onClick={onTryAnotherQuestion} variant="outline">
+                <RefreshCw className="mr-2 h-4 w-4" />
+                다른 문제 풀기
               </Button>
             </div>
           )}
