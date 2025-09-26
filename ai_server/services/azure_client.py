@@ -20,6 +20,9 @@ from ai_server.core.config import (
     AZURE_TTS_ENDPOINT, AZURE_TTS_API_KEY, AZURE_TTS_DEPLOYMENT, AZURE_TTS_API_VERSION, AZURE_TTS_VOICE,
     AZURE_QUESTION_MODEL_DEPLOYMENT, AZURE_QUESTION_MODEL_VERSION, AZURE_QUESTION_MODEL_ENDPOINT
 )
+from ai_server.services.tts_utils import (
+    detect_gender_and_voice, split_dialogue_by_speaker, should_use_dialogue_processing, combine_audio_segments
+)
 
 
 class BaseAzureClient:
@@ -241,12 +244,19 @@ class AzureTTSClient:
             
             return url, model_name
     
-    def synthesize_speech(self, text: str) -> str:
+    def synthesize_speech(
+        self, 
+        text: str, 
+        auto_detect_gender: bool = True, 
+        default_voice: str = "alloy"
+    ) -> str:
         """
         텍스트를 음성으로 변환하여 데이터 URI 반환
         
         Args:
             text: 변환할 텍스트
+            auto_detect_gender: 텍스트에서 성별을 자동 감지할지 여부
+            default_voice: 기본 음성 설정
             
         Returns:
             WAV 오디오 데이터 URI
@@ -254,39 +264,106 @@ class AzureTTSClient:
         self._validate_config()
         
         try:
-            url, model_name = self._build_url_and_model()
-            
-            headers = {
-                "api-key": self.api_key,
-                "Content-Type": "application/json",
-                "Accept": "audio/wav"
-            }
-            
-            payload = {
-                "model": model_name,
-                "voice": self.voice,
-                "input": text
-            }
-            
-            response = requests.post(url, headers=headers, json=payload, timeout=120)
-            
-            if not response.ok:
-                error_detail = response.text[:500] if response.text else "알 수 없는 오류"
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"TTS API 호출 실패 (상태코드: {response.status_code}): {error_detail}"
-                )
-            
-            # 응답 내용 검증
-            if len(response.content) == 0:
-                raise HTTPException(status_code=500, detail="TTS API가 빈 응답을 반환했습니다.")
-            
-            # 오디오 데이터를 Base64로 인코딩하여 데이터 URI 생성
-            audio_bytes = response.content
-            audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
-            return f"data:audio/wav;base64,{audio_base64}"
+            # 성별 자동 감지가 활성화된 경우
+            if auto_detect_gender:
+                # 대화형 처리가 필요한지 확인
+                if should_use_dialogue_processing(text):
+                    return self._synthesize_dialogue(text, default_voice)
+                else:
+                    # 단일 텍스트에서 성별 감지 시도
+                    _, detected_voice = detect_gender_and_voice(text)
+                    voice_to_use = detected_voice
+                    return self._synthesize_single_text(text, voice_to_use)
+            else:
+                # 자동 감지 비활성화 - 기본 음성 사용
+                return self._synthesize_single_text(text, default_voice)
             
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"TTS 변환 중 오류 발생: {str(e)}")
+    
+    def _synthesize_dialogue(self, text: str, default_voice: str) -> str:
+        """
+        대화 텍스트를 성별별로 분할하여 음성 합성 후 합치기
+        
+        Args:
+            text: 대화 텍스트
+            default_voice: 기본 음성
+            
+        Returns:
+            합성된 오디오 데이터 URI
+        """
+        dialogue_parts = split_dialogue_by_speaker(text)
+        
+        if len(dialogue_parts) == 1:
+            # 단일 발화자인 경우
+            text_part, voice = dialogue_parts[0]
+            return self._synthesize_single_text(text_part, voice)
+        else:
+            # 여러 발화자가 있는 경우 - 각각 따로 합성하여 합치기
+            audio_segments = []
+            
+            for i, (text_part, voice) in enumerate(dialogue_parts, 1):
+                try:
+                    audio_data_uri = self._synthesize_single_text(text_part, voice)
+                    audio_segments.append(audio_data_uri)
+                except Exception as e:
+                    # 실패한 경우 기본 음성으로 재시도
+                    try:
+                        audio_data_uri = self._synthesize_single_text(text_part, default_voice)
+                        audio_segments.append(audio_data_uri)
+                    except Exception as e2:
+                        continue
+            
+            if not audio_segments:
+                # 모든 세그먼트 생성 실패 시 전체 텍스트를 기본 음성으로 처리
+                return self._synthesize_single_text(text, default_voice)
+            
+            # 오디오 세그먼트들을 합치기
+            return combine_audio_segments(audio_segments)
+    
+    def _synthesize_single_text(self, text: str, voice: str) -> str:
+        """
+        단일 텍스트를 지정된 음성으로 합성
+        
+        Args:
+            text: 합성할 텍스트
+            voice: 사용할 음성 이름
+            
+        Returns:
+            WAV 오디오 데이터 URI
+        """
+        print(f"[TTS DEBUG] API 호출 준비 - 음성: {voice}, 텍스트 길이: {len(text)}")
+        
+        url, model_name = self._build_url_and_model()
+        
+        headers = {
+            "api-key": self.api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/wav"
+        }
+        
+        payload = {
+            "model": model_name,
+            "voice": voice,
+            "input": text,
+            "response_format": "wav"
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
+        
+        if not response.ok:
+            error_detail = response.text[:500] if response.text else "알 수 없는 오류"
+            raise HTTPException(
+                status_code=500, 
+                detail=f"TTS API 호출 실패 (상태코드: {response.status_code}): {error_detail}"
+            )
+        
+        # 응답 내용 검증
+        if len(response.content) == 0:
+            raise HTTPException(status_code=500, detail="TTS API가 빈 응답을 반환했습니다.")
+        
+        # 오디오 데이터를 Base64로 인코딩하여 데이터 URI 생성
+        audio_base64 = base64.b64encode(response.content).decode("ascii")
+        return f"data:audio/wav;base64,{audio_base64}"

@@ -4,13 +4,15 @@ API 요청/응답 스키마 정의
 FastAPI 엔드포인트에서 사용하는 Pydantic 모델들을 정의합니다.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field
 
 
 class TTSRequest(BaseModel):
     """TTS(음성합성) 요청 스키마"""
     text: str = Field(..., description="음성으로 변환할 텍스트")
+    auto_detect_gender: bool = Field(True, description="텍스트에서 성별을 자동 감지하여 음성을 선택할지 여부")
+    default_voice: str = Field("alloy", description="기본 음성 설정 (alloy, echo, fable 등)")
 
 
 class ChatMessage(BaseModel):
