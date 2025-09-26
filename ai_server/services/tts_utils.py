@@ -31,7 +31,6 @@ def detect_gender_and_voice(text: str) -> Tuple[GenderType, str]:
     """
     # 텍스트 앞부분의 공백 제거 후 소문자로 변환
     text_lower = text.strip().lower()
-    print(f"[TTS DEBUG] 텍스트 분석 중: '{text_lower[:50]}...'")
     
     # 남성 패턴 검사 (M:, Man:, Male:)
     male_patterns = [
@@ -44,7 +43,6 @@ def detect_gender_and_voice(text: str) -> Tuple[GenderType, str]:
     
     for pattern in male_patterns:
         if re.match(pattern, text_lower):
-            print(f"[TTS DEBUG] 남성 패턴 감지됨: '{pattern}' -> echo 음성 선택")
             return "male", "echo"
     
     # 여성 패턴 검사 (W:, Woman:, Female:)
@@ -58,11 +56,9 @@ def detect_gender_and_voice(text: str) -> Tuple[GenderType, str]:
     
     for pattern in female_patterns:
         if re.match(pattern, text_lower):
-            print(f"[TTS DEBUG] 여성 패턴 감지됨: '{pattern}' -> nova 음성 선택")
             return "female", "nova"
     
     # 기본값은 중성/나레이션 음성
-    print(f"[TTS DEBUG] 성별 패턴 감지되지 않음 -> alloy 음성 선택")
     return "neutral", "alloy"
 
 
@@ -131,11 +127,8 @@ def should_use_dialogue_processing(text: str) -> bool:
     Returns:
         대화형 처리가 필요한지 여부
     """
-    print(f"[TTS DEBUG] 대화형 처리 필요성 검사: '{text[:50]}...'")
-    
     # 줄바꿈이 있는 경우
     if '\n' in text:
-        print("[TTS DEBUG] 줄바꿈 감지됨 -> 대화형 처리 필요")
         return True
     
     # 성별 패턴 검사 - 더 정확한 패턴 사용
@@ -149,10 +142,8 @@ def should_use_dialogue_processing(text: str) -> bool:
     text_lower = text.lower()
     for pattern in patterns:
         if re.search(pattern, text_lower):
-            print(f"[TTS DEBUG] 성별 패턴 감지됨: '{pattern}' -> 대화형 처리 필요")
             return True
     
-    print("[TTS DEBUG] 대화형 처리 불필요 -> 단일 텍스트 처리")
     return False
 
 
@@ -173,12 +164,9 @@ def combine_audio_segments(audio_data_uris: List[str]) -> str:
     if len(audio_data_uris) == 1:
         return audio_data_uris[0]
     
-    print(f"[TTS DEBUG] {len(audio_data_uris)}개의 오디오 세그먼트 합치기 시작")
-    
     try:
         return _combine_wav_segments_safe(audio_data_uris)
     except Exception as e:
-        print(f"[TTS DEBUG] 안전한 WAV 합치기 실패: {str(e)} - 첫 번째 파일만 반환")
         return audio_data_uris[0]
 
 
@@ -201,27 +189,22 @@ def _combine_wav_segments_safe(audio_data_uris: List[str]) -> str:
             
             # Base64 디코딩
             audio_bytes = base64.b64decode(base64_data)
-            print(f"[TTS DEBUG] 세그먼트 {i+1} 크기: {len(audio_bytes)} bytes")
             
             # 첫 번째 파일에서 WAV 헤더 정보 추출
             if i == 0 and len(audio_bytes) >= 44:  # WAV 헤더는 최소 44바이트
                 wav_header = audio_bytes[:44]  # WAV 헤더 부분
-                print(f"[TTS DEBUG] WAV 헤더 추출 완료 (44 bytes)")
             
             # WAV 데이터 부분만 추출 (헤더 44바이트 제외)
             if len(audio_bytes) > 44:
                 audio_data = audio_bytes[44:]
                 audio_data_list.append(audio_data)
-                print(f"[TTS DEBUG] 세그먼트 {i+1} 오디오 데이터: {len(audio_data)} bytes")
                 
                 # 마지막 세그먼트가 아닌 경우 간격 추가 (500ms 무음)
                 if i < len(audio_data_uris) - 1:
                     silence_data = _create_silence_data(wav_header, 0.5)  # 0.5초 무음
                     audio_data_list.append(silence_data)
-                    print(f"[TTS DEBUG] 세그먼트 {i+1} 후 무음 추가: {len(silence_data)} bytes")
             
         except Exception as e:
-            print(f"[TTS DEBUG] 세그먼트 {i+1} 처리 오류: {str(e)}")
             continue
     
     if not audio_data_list or wav_header is None:
@@ -249,8 +232,6 @@ def _combine_wav_segments_safe(audio_data_uris: List[str]) -> str:
     # Base64 인코딩하여 데이터 URI 생성
     audio_base64 = base64.b64encode(final_wav_bytes).decode("ascii")
     final_data_uri = f"data:audio/wav;base64,{audio_base64}"
-    
-    print(f"[TTS DEBUG] 오디오 합치기 완료 - 총 크기: {len(final_wav_bytes)} bytes")
     
     return final_data_uri
 
@@ -281,11 +262,9 @@ def _create_silence_data(wav_header: bytes, duration_seconds: float) -> bytes:
         # 무음 데이터 생성 (모든 바이트를 0으로)
         silence_data = b'\x00' * silence_size
         
-        print(f"[TTS DEBUG] 무음 생성: {duration_seconds}초, {silence_size} bytes")
         return silence_data
         
     except Exception as e:
-        print(f"[TTS DEBUG] 무음 생성 오류: {str(e)} - 기본 무음 반환")
         # 기본값: 44.1kHz, 스테레오, 16비트로 가정
         default_size = int(44100 * duration_seconds * 2 * 2)  # 2채널, 2바이트
         return b'\x00' * default_size
@@ -303,5 +282,4 @@ def _combine_non_wav_segments(audio_data_uris: List[str]) -> str:
     Returns:
         첫 번째 오디오의 데이터 URI (임시 방편)
     """
-    print("[TTS DEBUG] WAV가 아닌 형식 - 첫 번째 세그먼트만 반환 (임시 방편)")
     return audio_data_uris[0]
