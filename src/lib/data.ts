@@ -476,7 +476,7 @@ export async function updateUserCatfishExperience(userId: string, xpToAdd: numbe
   const pool = await getDbPool();
   const transaction = pool.transaction();
   
-  const XP_PER_LEVEL = 30;
+  const XP_PER_LEVEL = 4;
   const STAGES = [
     { level: 1, name: '알' },
     { level: 5, name: '치어' },

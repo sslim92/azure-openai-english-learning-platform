@@ -128,10 +128,12 @@ export async function processUserSubmission(input: {
       })
     ];
 
-    if (input.isCorrect) {
-      const XP_PER_CORRECT_ANSWER = 10;
-      dbOperations.push(updateUserCatfishExperience(input.userId, XP_PER_CORRECT_ANSWER));
-    }
+    // 정답일 때와 오답일 때 모두 경험치 지급
+    const XP_PER_CORRECT_ANSWER = 10;
+    const XP_PER_INCORRECT_ANSWER = 5;
+    
+    const xpToAdd = input.isCorrect ? XP_PER_CORRECT_ANSWER : XP_PER_INCORRECT_ANSWER;
+    dbOperations.push(updateUserCatfishExperience(input.userId, xpToAdd));
 
     await Promise.all(dbOperations);
     
