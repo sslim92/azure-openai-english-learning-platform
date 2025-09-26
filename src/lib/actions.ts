@@ -265,9 +265,17 @@ export async function processUserMistake(input: {
 }
 
 
-export async function textToSpeech(text: string): Promise<{ success: boolean; audioDataUri?: string; error?: string }> {
+export async function textToSpeech(
+    text: string,
+    autoDetectGender: boolean = true,
+    defaultVoice: string = "alloy"
+): Promise<{ success: boolean; audioDataUri?: string; error?: string }> {
     try {
-        const result = await postToAiServer('/generate-audio', { text });
+        const result = await postToAiServer('/generate-audio', { 
+            text,
+            auto_detect_gender: autoDetectGender,
+            default_voice: defaultVoice
+        });
         return { success: true, audioDataUri: result.audioDataUri };
     } catch (error) {
         console.error('Text to speech failed:', error);
