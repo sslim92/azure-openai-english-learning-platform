@@ -482,7 +482,7 @@ export async function updateUserCatfishExperience(userId: string, xpToAdd: numbe
     { level: 5, name: '치어' },
     { level: 10, name: '아기메기' },
     { level: 15, name: '성인메기' },
-    { level: 20, name: '졸업생 메기' },
+    { level: 20, name: '졸업생메기' },
   ];
 
   try {
