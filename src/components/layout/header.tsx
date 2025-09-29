@@ -63,7 +63,7 @@ export function Header() {
                 <Button variant="outline" className="gap-2">
                    {user.stage ? (
                       <Image 
-                          src={`/images/catfish/${user.stage}.png`} 
+                          src={`/images/catfish/${user.stage.replace(/\s+/g, '')}.png`} 
                           alt={user.stage}
                           width={24}
                           height={24}

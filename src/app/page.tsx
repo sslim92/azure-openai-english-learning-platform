@@ -95,7 +95,7 @@ export default function DashboardPage() {
             <CardContent className="flex flex-col items-center justify-center text-center pt-8">
                 <div className="relative w-48 h-48 sm:w-56 sm:h-56 flex-shrink-0 mb-6">
                     <Image
-                        src={`/images/catfish/${user.stage || '알'}.png`}
+                        src={`/images/catfish/${(user.stage || '알').replace(/\s+/g, '')}.png`}
                         alt={user.stage || '알'}
                         fill
                         priority

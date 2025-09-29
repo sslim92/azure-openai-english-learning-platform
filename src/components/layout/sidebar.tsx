@@ -36,7 +36,7 @@ export function AppSidebar({ isMobile = false }) {
             <div className="p-2 flex flex-col items-center text-center gap-2 group-data-[collapsible=icon]:hidden">
                 <div className="relative w-24 h-24">
                      <Image 
-                        src={`/images/catfish/${user.stage}.png`}
+                        src={`/images/catfish/${user.stage?.replace(/\s+/g, '')}.png`}
                         alt={user.stage}
                         width={96}
                         height={96}
@@ -57,7 +57,7 @@ export function AppSidebar({ isMobile = false }) {
                 >
                     <div className="relative w-6 h-6">
                         <Image 
-                            src={`/images/catfish/${user.stage}.png`}
+                            src={`/images/catfish/${user.stage?.replace(/\s+/g, '')}.png`}
                             alt={user.stage}
                             width={24}
                             height={24}
