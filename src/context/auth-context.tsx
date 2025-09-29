@@ -23,6 +23,7 @@ interface AuthContextType {
   signup: (email: string, pass: string, displayName: string) => Promise<void>;
   login: (email: string, pass:string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUserData: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -60,6 +61,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                  console.error("Failed to fetch user profile after sync.");
                  const fallbackUser: AppUser = {
                     ...firebaseUser,
+                    userId: firebaseUser.uid,
+                    email: firebaseUser.email || '',
                     level: 1,
                     experiencePoints: 0,
                     stage: '알',
@@ -74,6 +77,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error("Failed to sync or fetch user profile on auth state change:", error);
             const errorFallbackUser: AppUser = {
                 ...firebaseUser,
+                userId: firebaseUser.uid,
+                email: firebaseUser.email || '',
                 level: 1,
                 experiencePoints: 0,
                 stage: '알',
@@ -136,12 +141,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshUserData = async () => {
+    if (!user?.uid) {
+      console.warn("Cannot refresh user data: user is null or uid is missing");
+      return;
+    }
+    
+    try {
+      const [userProfile, userStats] = await Promise.all([
+        getUserProfile(user.uid),
+        getUserStats(user.uid)
+      ]);
+      
+      if (userProfile && userStats) {
+        const updatedUser: AppUser = {
+          ...user,
+          ...userProfile,
+          ...userStats,
+        };
+        setUser(updatedUser);
+      } else {
+        console.warn("Failed to refresh user data: incomplete profile or stats data");
+      }
+    } catch (error) {
+      console.error("Failed to refresh user data:", error);
+      // 에러가 발생해도 기존 사용자 상태는 유지 (사용자 경험에 영향 없음)
+    }
+  };
+
   const value: AuthContextType = {
     user,
     loading,
     signup,
     login,
     logout,
+    refreshUserData,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

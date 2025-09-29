@@ -40,7 +40,7 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
   
   const router = useRouter();
   const { toast } = useToast();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, refreshUserData } = useAuth();
 
 
   useEffect(() => {
@@ -123,6 +123,12 @@ export default function QuestionClientPage({ initialQuestion }: QuestionClientPa
         if (!result.success) {
             throw new Error(result.error || '답안 제출 기록에 실패했습니다.');
         }
+        
+        // 답안 제출 후 사용자 데이터 자동 새로고침 (레벨업 반영)
+        if (result.updatedUserData || result.success) {
+            await refreshUserData();
+        }
+        
     } catch (dbError) {
         console.error("Failed to save user submission", dbError);
         toast({

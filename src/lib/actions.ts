@@ -113,7 +113,7 @@ export async function processUserSubmission(input: {
   questionId: string;
   selectedOptionId: string;
   isCorrect: boolean;
-}): Promise<{ success: boolean; error?: string; }> {
+}): Promise<{ success: boolean; error?: string; updatedUserData?: any; }> {
   if (!input.userId || !input.questionId || !input.selectedOptionId) {
     return { success: false, error: '사용자, 질문, 또는 선택한 답변 정보가 누락되었습니다.' };
   }
@@ -137,11 +137,23 @@ export async function processUserSubmission(input: {
 
     await Promise.all(dbOperations);
     
+    // 업데이트된 사용자 데이터를 가져옴
+    const [updatedProfile, updatedStats] = await Promise.all([
+      getUserProfile(input.userId),
+      getUserStats(input.userId)
+    ]);
+    
     revalidatePath('/progress');
     revalidatePath('/'); // For dashboard updates
     revalidatePath('/layout'); // For sidebar updates
 
-    return { success: true };
+    return { 
+      success: true, 
+      updatedUserData: {
+        ...updatedProfile,
+        ...updatedStats
+      }
+    };
 
   } catch (error) {
     console.error("Error processing user submission in actions.ts:", error);
